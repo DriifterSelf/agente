@@ -10,8 +10,27 @@ class InferenceEngine:
         self.active_model_name: Optional[str] = None
         self.llm = None
         self.backend_type = "auto" # 'llama_cpp', 'openai_compatible', 'mock'
-        self.api_base = "http://127.0.0.1:11434/v1" # Optional fallback if external server is running
+        self.api_base = "http://127.0.0.1:11434/v1"
         
+        # --- Configuración de Contexto en RAM ---
+        # 32K por defecto para aprovechar los 64 GB DDR5 del sistema
+        self.n_ctx = 32768
+        self.use_ram_for_kv = True # True = KV Cache vive en RAM (protege la VRAM de 8GB para los pesos)
+        self.flash_attn = True
+
+    def set_context_config(self, n_ctx: int, use_ram_for_kv: bool = True):
+        """Allows dynamically configuring context size and RAM allocation."""
+        self.n_ctx = n_ctx
+        self.use_ram_for_kv = use_ram_for_kv
+        # Estimated RAM consumption
+        ram_gb = round((n_ctx / 32768) * 6.0, 1)
+        return {
+            "n_ctx": self.n_ctx,
+            "use_ram_for_kv": self.use_ram_for_kv,
+            "estimated_ram_gb": ram_gb,
+            "description": f"Contexto configurado a {self.n_ctx // 1024}K tokens utilizando ~{ram_gb} GB de RAM del sistema."
+        }
+
     def list_available_models(self) -> List[Dict[str, Any]]:
         """Scans the models directory for .gguf files."""
         models = []
@@ -27,37 +46,47 @@ class InferenceEngine:
                     })
         return models
 
-    def load_model(self, model_filename: str, n_gpu_layers: int = 35, n_ctx: int = 8192) -> Dict[str, Any]:
+    def load_model(self, model_filename: str, n_gpu_layers: int = 35, n_ctx: Optional[int] = None) -> Dict[str, Any]:
         """
-        Loads a GGUF model directly using llama-cpp-python with CUDA acceleration.
-        n_gpu_layers=35-40 offloads the majority of layers to the RTX 4070 (8GB VRAM),
-        and the rest to 64GB DDR5 RAM with 16-24 threads.
+        Loads a GGUF model with GPU layer offloading and System RAM KV cache.
+        When use_ram_for_kv is True, offload_kqv=False stores the KV cache (context)
+        entirely in your 64 GB DDR5 RAM, leaving the 8 GB of VRAM free for model weights!
         """
         model_path = os.path.join(self.models_dir, model_filename)
         if not os.path.exists(model_path):
             return {"status": "error", "message": f"Archivo de modelo no encontrado en {model_path}"}
             
+        ctx = n_ctx or self.n_ctx
         try:
             from llama_cpp import Llama
-            # Initialize with GPU offloading and multi-threaded CPU
+            
+            # offload_kqv=False ensures the KV cache resides in 64GB host RAM, NOT VRAM
+            offload_kv_to_gpu = not self.use_ram_for_kv
+            
             self.llm = Llama(
                 model_path=model_path,
                 n_gpu_layers=n_gpu_layers,
-                n_ctx=n_ctx,
-                n_threads=16, # Optimized for i9-14900HX performance cores
+                n_ctx=ctx,
+                n_threads=16, # i9-14900HX performance threads
+                offload_kqv=offload_kv_to_gpu,
+                flash_attn=self.flash_attn,
+                n_batch=1024,
                 verbose=False
             )
             self.active_model_name = model_filename
             self.backend_type = "llama_cpp"
+            ram_gb = round((ctx / 32768) * 6.0, 1)
             return {
                 "status": "success",
-                "message": f"Modelo {model_filename} cargado exitosamente en RTX 4070 (GPU) + RAM.",
-                "active_model": model_filename
+                "message": f"Modelo cargado: {model_filename} con contexto de {ctx // 1024}K tokens en RAM (~{ram_gb} GB).",
+                "active_model": model_filename,
+                "n_ctx": ctx,
+                "ram_allocated_gb": ram_gb
             }
         except ImportError:
             return {
                 "status": "warning",
-                "message": "llama-cpp-python no está instalado con CUDA aún. El motor usará el modo compatible.",
+                "message": "llama-cpp-python no está instalado con aceleración GPU aún. El motor usará el modo compatible.",
                 "active_model": None
             }
         except Exception as e:

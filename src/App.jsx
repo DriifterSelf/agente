@@ -307,6 +307,7 @@ export default function App() {
         activeProject={activeProject}
         systemStatus={systemStatus}
         isBackendConnected={isBackendConnected}
+        onRefreshStatus={fetchSystemStatus}
       />
 
       {/* 2. Main 3-Column Antigravity Layout */}

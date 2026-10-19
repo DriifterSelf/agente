@@ -50,7 +50,7 @@ class SystemTools:
         return sorted(items, key=lambda x: (not x["is_dir"], x["name"].lower()))
 
     @staticmethod
-    def read_file_content(file_path: str, max_chars: int = 25000) -> Dict[str, Any]:
+    def read_file_content(file_path: str, max_chars: int = 200000) -> Dict[str, Any]:
         """
         Universal Multimodal Reader:
         Processes virtually any file format:
@@ -75,7 +75,7 @@ class SystemTools:
                 reader = pypdf.PdfReader(file_path)
                 num_pages = len(reader.pages)
                 extracted_pages = []
-                for p_idx, page in enumerate(reader.pages[:40]): # Read up to 40 pages
+                for p_idx, page in enumerate(reader.pages[:100]): # Read up to 100 pages (supported by large RAM context)
                     text = page.extract_text() or ""
                     if text.strip():
                         extracted_pages.append(f"--- [Página {p_idx + 1}] ---\n{text.strip()}")

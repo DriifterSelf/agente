@@ -59,10 +59,19 @@ class OpenFileRequest(BaseModel):
 class LoadModelRequest(BaseModel):
     filename: str
     gpu_layers: int = 35
+    n_ctx: Optional[int] = None
+
+class ContextSettingsRequest(BaseModel):
+    n_ctx: int
+    use_ram_for_kv: bool = True
 
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "service": "Agente AI"}
+
+@app.post("/api/settings/context")
+def set_context_settings(req: ContextSettingsRequest):
+    return engine.set_context_config(req.n_ctx, req.use_ram_for_kv)
 
 def detect_active_gpu():
     try:
@@ -93,6 +102,8 @@ def get_system_status():
     cpu_percent = psutil.cpu_percent(interval=None)
     gpu_info = detect_active_gpu()
     
+    ram_ctx_gb = round((engine.n_ctx / 32768) * 6.0, 1)
+
     return {
         "cpu_usage": cpu_percent,
         "ram_total_gb": total_ram_gb,
@@ -102,7 +113,11 @@ def get_system_status():
         "backend_type": engine.backend_type,
         "gpu_name": gpu_info["name"],
         "gpu_backend": gpu_info["backend"],
-        "gpu_vram": gpu_info["vram"]
+        "gpu_vram": gpu_info["vram"],
+        "n_ctx": engine.n_ctx,
+        "n_ctx_k": engine.n_ctx // 1024,
+        "use_ram_for_kv": engine.use_ram_for_kv,
+        "context_ram_gb": ram_ctx_gb
     }
 
 # --- GIT & OTA UPDATE ENDPOINTS ---
@@ -218,7 +233,7 @@ def list_models():
 
 @app.post("/api/models/load")
 def load_model(req: LoadModelRequest):
-    return engine.load_model(req.filename, n_gpu_layers=req.gpu_layers)
+    return engine.load_model(req.filename, n_gpu_layers=req.gpu_layers, n_ctx=req.n_ctx)
 
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
