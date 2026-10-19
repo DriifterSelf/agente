@@ -81,7 +81,11 @@ class SystemTools:
         Opens a file or folder directly in Windows using its default registered program (Excel, Word, PowerPoint, Explorer).
         """
         if not os.path.exists(file_path):
-            return {"status": "error", "message": f"La ruta no existe: {file_path}"}
+            # If it's a directory target, create it
+            if not os.path.splitext(file_path)[1]:
+                os.makedirs(file_path, exist_ok=True)
+            else:
+                return {"status": "error", "message": f"La ruta no existe: {file_path}"}
         try:
             os.startfile(file_path)
             return {"status": "success", "message": f"Abierto con éxito en Windows: {file_path}"}

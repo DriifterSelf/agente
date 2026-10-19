@@ -87,12 +87,17 @@ export default function App() {
         body: JSON.stringify({ name })
       });
       if (res.ok) {
+        const created = await res.json();
         await fetchProjects();
-        setActiveProject(name);
+        setActiveProject(created.name || name);
         setMessages([]);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`No se pudo crear el proyecto: ${err.detail || 'Verifica el nombre.'}`);
       }
     } catch (e) {
       console.error('Error creating project:', e);
+      alert(`Error conectando con el motor local (${API_BASE}): ${e.message}\nVerifica que el servicio esté activo.`);
     }
   };
 

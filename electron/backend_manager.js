@@ -1,10 +1,11 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 
 class BackendManager {
   constructor(appPath) {
-    this.appPath = appPath;
+    this.appPath = path.resolve(appPath);
     this.process = null;
     this.port = 8765;
   }
@@ -18,27 +19,28 @@ class BackendManager {
 
       const serverScript = path.join(this.appPath, 'backend', 'server.py');
 
-      console.log(`[BackendManager] Starting backend: ${pythonExe} ${serverScript}`);
+      const logFile = path.join(this.appPath, 'backend.log');
+      const logStream = fs.createWriteStream(logFile, { flags: 'a' });
 
-      // Spawning with windowsHide: true ensures NO black terminal window opens on Windows!
+      logStream.write(`\n--- [${new Date().toISOString()}] Starting Backend ---\n`);
+      logStream.write(`Path: ${this.appPath}\nPython: ${pythonExe}\nScript: ${serverScript}\n`);
+
       this.process = spawn(pythonExe, [serverScript], {
         cwd: this.appPath,
         windowsHide: true,
+        env: {
+          ...process.env,
+          PYTHONPATH: this.appPath,
+          PYTHONUNBUFFERED: '1'
+        },
         stdio: ['ignore', 'pipe', 'pipe']
       });
 
-      this.process.stdout.on('data', (data) => {
-        const msg = data.toString();
-        // console.log(`[Backend stdout] ${msg}`);
-      });
-
-      this.process.stderr.on('data', (data) => {
-        const msg = data.toString();
-        // console.error(`[Backend stderr] ${msg}`);
-      });
+      this.process.stdout.pipe(logStream);
+      this.process.stderr.pipe(logStream);
 
       this.process.on('close', (code) => {
-        console.log(`[BackendManager] Python backend exited with code ${code}`);
+        logStream.write(`[BackendManager] Process exited with code ${code}\n`);
       });
 
       // Poll until server is ready
@@ -49,7 +51,7 @@ class BackendManager {
         const req = http.get(`http://127.0.0.1:${this.port}/api/health`, (res) => {
           if (res.statusCode === 200) {
             clearInterval(interval);
-            console.log('[BackendManager] Backend is ready and responding on port', this.port);
+            logStream.write('[BackendManager] Health check OK. Server ready.\n');
             resolve();
           }
         });
@@ -57,7 +59,7 @@ class BackendManager {
         req.on('error', () => {
           if (attempts >= maxAttempts) {
             clearInterval(interval);
-            console.warn('[BackendManager] Backend health check timed out. Proceeding anyway.');
+            logStream.write('[BackendManager] Warning: Health check timed out.\n');
             resolve();
           }
         });
@@ -67,7 +69,6 @@ class BackendManager {
 
   stop() {
     if (this.process) {
-      console.log('[BackendManager] Stopping Python backend process...');
       try {
         if (process.platform === 'win32') {
           spawn('taskkill', ['/pid', this.process.pid, '/f', '/t'], { windowsHide: true });
