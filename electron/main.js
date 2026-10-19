@@ -105,6 +105,18 @@ function createWindow() {
     return await shell.openExternal(url);
   });
 
+  ipcMain.handle('window-is-maximized', () => {
+    return mainWindow ? mainWindow.isMaximized() : false;
+  });
+
+  mainWindow.on('maximize', () => {
+    mainWindow?.webContents.send('window-maximized-change', true);
+  });
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow?.webContents.send('window-maximized-change', false);
+  });
+
   // Load URL or built file
   const distHtml = path.join(__dirname, '..', 'dist', 'index.html');
 

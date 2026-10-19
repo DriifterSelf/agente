@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import TitleBar from './components/TitleBar';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
@@ -13,19 +13,20 @@ export default function App() {
   const [artifacts, setArtifacts] = useState([]);
   const [messages, setMessages] = useState([]);
   
-  // Streaming state
+  // Streaming & abort state
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamContent, setCurrentStreamContent] = useState('');
   const [activeActions, setActiveActions] = useState([]);
+  const abortControllerRef = useRef(null);
   
   // Hardware/System state
   const [systemStatus, setSystemStatus] = useState(null);
+  const [isBackendConnected, setIsBackendConnected] = useState(false);
 
   // 1. Initial Load: Projects & Status
   useEffect(() => {
-    fetchProjects();
-    fetchSystemStatus();
-    const interval = setInterval(fetchSystemStatus, 5000);
+    checkHealthAndLoad();
+    const interval = setInterval(checkHealthAndLoad, 4000);
     return () => clearInterval(interval);
   }, []);
 
@@ -33,8 +34,26 @@ export default function App() {
   useEffect(() => {
     if (activeProject) {
       fetchProjectFiles(activeProject);
+    } else {
+      setProjectFiles([]);
+      setArtifacts([]);
     }
   }, [activeProject]);
+
+  const checkHealthAndLoad = async () => {
+    try {
+      const healthRes = await fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(2500) });
+      if (healthRes.ok) {
+        setIsBackendConnected(true);
+        fetchProjects();
+        fetchSystemStatus();
+      } else {
+        setIsBackendConnected(false);
+      }
+    } catch (e) {
+      setIsBackendConnected(false);
+    }
+  };
 
   const fetchSystemStatus = async () => {
     try {
@@ -44,7 +63,7 @@ export default function App() {
         setSystemStatus(data);
       }
     } catch (e) {
-      // Backend might still be spinning up
+      // Backend busy or restarting
     }
   };
 
@@ -54,9 +73,12 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setProjects(data);
-        if (data.length > 0 && !activeProject) {
-          setActiveProject(data[0].name);
-        }
+        // If current project was removed or none selected, pick first
+        setActiveProject(prev => {
+          if (!prev && data.length > 0) return data[0].name;
+          if (prev && !data.some(p => p.name === prev)) return data.length > 0 ? data[0].name : '';
+          return prev;
+        });
       }
     } catch (e) {
       console.error('Error fetching projects:', e);
@@ -64,13 +86,14 @@ export default function App() {
   };
 
   const fetchProjectFiles = async (projName) => {
+    if (!projName) return;
     try {
       const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projName)}/files`);
       if (res.ok) {
         const files = await res.json();
         setProjectFiles(files);
         
-        // Filter out created artifacts (.xlsx, .docx, .pptx, .pdf, images, zip, audio, video, data)
+        // Filter out created deliverables (.xlsx, .docx, .pptx, .pdf, images, zip, audio, video, data)
         const arts = files.filter(f => !f.is_dir && /\.(xlsx|docx|pptx|pdf|csv|png|jpg|jpeg|webp|zip|json|html|md|txt|mp3|wav|m4a|mp4|mkv|mov)$/i.test(f.name));
         setArtifacts(arts);
       }
@@ -98,6 +121,24 @@ export default function App() {
     } catch (e) {
       console.error('Error creating project:', e);
       alert(`Error conectando con el motor local (${API_BASE}): ${e.message}\nVerifica que el servicio esté activo.`);
+    }
+  };
+
+  const handleDeleteProject = async (name) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(name)}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        await fetchProjects();
+        if (activeProject === name) {
+          setMessages([]);
+        }
+      } else {
+        alert('No se pudo eliminar el proyecto.');
+      }
+    } catch (e) {
+      console.error('Error deleting project:', e);
     }
   };
 
@@ -133,11 +174,9 @@ export default function App() {
 
   const handleOpenFile = async (filePath) => {
     try {
-      // First try via Electron native IPC if available
       if (window.electronAPI && window.electronAPI.openPath) {
         await window.electronAPI.openPath(filePath);
       } else {
-        // Fallback to FastAPI backend
         await fetch(`${API_BASE}/api/system/open-file`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -146,6 +185,25 @@ export default function App() {
       }
     } catch (e) {
       console.error('Error opening file:', e);
+    }
+  };
+
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      setIsStreaming(false);
+      if (currentStreamContent) {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: currentStreamContent + '\n\n*(Generación detenida por el usuario)*',
+            actions: []
+          }
+        ]);
+      }
+      setCurrentStreamContent('');
+      setActiveActions([]);
     }
   };
 
@@ -160,6 +218,9 @@ export default function App() {
     setCurrentStreamContent('');
     setActiveActions([]);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     let accumulatedContent = '';
     const completedActions = [];
 
@@ -170,7 +231,8 @@ export default function App() {
         body: JSON.stringify({
           project_name: activeProject,
           messages: newMessages
-        })
+        }),
+        signal: controller.signal
       });
 
       const reader = response.body.getReader();
@@ -183,7 +245,7 @@ export default function App() {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop(); // Keep remainder
+        buffer = lines.pop();
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -202,7 +264,6 @@ export default function App() {
                 setActiveActions(prev => prev.filter(a => a.tool !== event.tool));
                 completedActions.push({ tool: event.tool, result: event.result });
               } else if (event.type === 'artifact_created') {
-                // Refresh project artifacts immediately
                 fetchProjectFiles(activeProject);
               }
             } catch (err) {
@@ -212,7 +273,6 @@ export default function App() {
         }
       }
 
-      // Finalize message in thread
       setMessages(prev => [
         ...prev,
         {
@@ -222,14 +282,16 @@ export default function App() {
         }
       ]);
     } catch (e) {
-      console.error('Error sending message:', e);
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: 'Ocurrió un error al procesar la solicitud. Por favor intenta de nuevo.'
-        }
-      ]);
+      if (e.name !== 'AbortError') {
+        console.error('Error sending message:', e);
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: 'Ocurrió un error al procesar la solicitud. Por favor intenta de nuevo.'
+          }
+        ]);
+      }
     } finally {
       setIsStreaming(false);
       setCurrentStreamContent('');
@@ -241,7 +303,11 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-background">
       {/* 1. Frameless Custom TitleBar */}
-      <TitleBar activeProject={activeProject} systemStatus={systemStatus} />
+      <TitleBar
+        activeProject={activeProject}
+        systemStatus={systemStatus}
+        isBackendConnected={isBackendConnected}
+      />
 
       {/* 2. Main 3-Column Antigravity Layout */}
       <div className="flex flex-1 overflow-hidden">
@@ -254,6 +320,7 @@ export default function App() {
             setMessages([]);
           }}
           onCreateProject={handleCreateProject}
+          onDeleteProject={handleDeleteProject}
           onOpenProjectFolder={handleOpenProjectFolder}
           projectFiles={projectFiles}
         />
@@ -262,6 +329,7 @@ export default function App() {
         <ChatArea
           messages={messages}
           onSendMessage={handleSendMessage}
+          onStopGeneration={handleStopGeneration}
           isStreaming={isStreaming}
           currentStreamContent={currentStreamContent}
           activeActions={activeActions}
@@ -269,7 +337,7 @@ export default function App() {
           onUploadFile={handleUploadFile}
         />
 
-        {/* Right: Artifacts & Deliverables (.xlsx, .docx, .pptx) */}
+        {/* Right: Artifacts & Deliverables */}
         <ArtifactsPanel
           artifacts={artifacts}
           onOpenFile={handleOpenFile}

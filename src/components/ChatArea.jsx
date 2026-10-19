@@ -16,12 +16,19 @@ import {
   File,
   Image as ImageIcon,
   Music,
-  Archive
+  Archive,
+  Square,
+  Copy,
+  Check,
+  Video,
+  BarChart3,
+  Code
 } from 'lucide-react';
 
 export default function ChatArea({
   messages,
   onSendMessage,
+  onStopGeneration,
   isStreaming,
   currentStreamContent,
   activeActions,
@@ -32,10 +39,13 @@ export default function ChatArea({
   const [expandedActions, setExpandedActions] = useState({});
   const [attachments, setAttachments] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState(null);
   
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
   const messagesEndRef = useRef(null);
 
+  // Auto-scroll only when appropriate
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -43,6 +53,15 @@ export default function ChatArea({
   useEffect(() => {
     scrollToBottom();
   }, [messages, currentStreamContent, activeActions]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      const newHeight = Math.min(textareaRef.current.scrollHeight, 160);
+      textareaRef.current.style.height = `${Math.max(newHeight, 46)}px`;
+    }
+  }, [input]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -55,6 +74,9 @@ export default function ChatArea({
       onSendMessage(finalPrompt);
       setInput('');
       setAttachments([]);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = '46px';
+      }
     }
   };
 
@@ -111,6 +133,13 @@ export default function ChatArea({
     setExpandedActions((prev) => ({ ...prev, [idx]: !prev[idx] }));
   };
 
+  const copyToClipboard = (text, index) => {
+    const cleanText = text.replace(/```action[\s\S]*?```/g, '').trim();
+    navigator.clipboard.writeText(cleanText);
+    setCopiedIndex(index);
+    setTimeout(() => setCopiedIndex(null), 2000);
+  };
+
   const quickPrompts = [
     { label: '📊 Excel Financiero', prompt: 'Crea un archivo Excel con el presupuesto anual detallado, fórmulas de sumatoria y margen, y un gráfico comparativo.' },
     { label: '📄 Informe Ejecutivo Word', prompt: 'Redacta un informe ejecutivo profesional en Word sobre la estrategia de operaciones y eficiencia para este trimestre.' },
@@ -126,9 +155,25 @@ export default function ChatArea({
         return <FileText size={14} className="text-blue-400" />;
       case 'create_powerpoint':
         return <Presentation size={14} className="text-amber-400" />;
+      case 'create_pdf':
+        return <FileText size={14} className="text-rose-400" />;
+      case 'create_chart_image':
+        return <BarChart3 size={14} className="text-purple-400" />;
+      case 'generate_speech':
+        return <Music size={14} className="text-pink-400" />;
+      case 'create_video_slideshow':
+        return <Video size={14} className="text-indigo-400" />;
+      case 'extract_audio':
+        return <Music size={14} className="text-pink-400" />;
+      case 'create_zip':
+        return <Archive size={14} className="text-yellow-400" />;
+      case 'create_file':
+        return <File size={14} className="text-cyan-400" />;
       case 'web_search':
       case 'fetch_page':
         return <Globe size={14} className="text-cyan-400" />;
+      case 'execute_task':
+        return <Code size={14} className="text-emerald-400" />;
       default:
         return <Sparkles size={14} className="text-purple-400" />;
     }
@@ -142,10 +187,26 @@ export default function ChatArea({
         return `Redactando Word: ${params.filename || 'Documento.docx'}`;
       case 'create_powerpoint':
         return `Creando PowerPoint: ${params.filename || 'Presentacion.pptx'}`;
+      case 'create_pdf':
+        return `Generando PDF: ${params.filename || 'Documento.pdf'}`;
+      case 'create_chart_image':
+        return `Generando Gráfico: ${params.filename || 'grafico.png'}`;
+      case 'generate_speech':
+        return `Generando Audio Narrado: ${params.filename || 'audio.mp3'}`;
+      case 'create_video_slideshow':
+        return `Creando Video MP4: ${params.output_video || 'video.mp4'}`;
+      case 'extract_audio':
+        return `Extrayendo Audio: ${params.output_audio_filename || 'audio.mp3'}`;
+      case 'create_zip':
+        return `Comprimiendo ZIP: ${params.archive_name || 'entrega.zip'}`;
+      case 'create_file':
+        return `Creando Archivo: ${params.filename || 'archivo'}`;
       case 'web_search':
         return `Buscando en la web: "${params.query || ''}"`;
       case 'fetch_page':
         return `Leyendo página: ${params.url || ''}`;
+      case 'execute_task':
+        return 'Ejecutando tarea en segundo plano';
       default:
         return `Ejecutando tarea: ${tool}`;
     }
@@ -158,6 +219,7 @@ export default function ChatArea({
     if (['xlsx', 'xls', 'csv'].includes(ext)) return <FileSpreadsheet size={13} className="text-emerald-400" />;
     if (['pptx', 'ppt'].includes(ext)) return <Presentation size={13} className="text-amber-400" />;
     if (['mp3', 'wav', 'm4a'].includes(ext)) return <Music size={13} className="text-rose-400" />;
+    if (['mp4', 'mkv', 'mov'].includes(ext)) return <Video size={13} className="text-indigo-400" />;
     if (['zip', 'rar'].includes(ext)) return <Archive size={13} className="text-yellow-400" />;
     return <File size={13} className="text-slate-400" />;
   };
@@ -186,7 +248,7 @@ export default function ChatArea({
           <div className="p-4 rounded-2xl bg-blue-600/20 border border-blue-500/40 text-blue-400 flex flex-col items-center space-y-2">
             <Paperclip size={32} className="animate-bounce" />
             <p className="text-sm font-semibold text-slate-100">Suelta los archivos aquí</p>
-            <p className="text-xs text-slate-400">PDFs, Word, Excel, PowerPoint, Imágenes, Audio, ZIP...</p>
+            <p className="text-xs text-slate-400">PDFs, Word, Excel, PowerPoint, Imágenes, Audio, Video, ZIP...</p>
           </div>
         </div>
       )}
@@ -195,15 +257,15 @@ export default function ChatArea({
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center max-w-xl mx-auto space-y-4">
-            <div className="w-16 h-16 rounded-2xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center">
+            <div className="w-16 h-16 rounded-2xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center shadow-lg shadow-blue-500/5">
               <Sparkles size={32} className="text-blue-400" />
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-100">
-                Asistente Multimodal Activo
+                ¿En qué puedo ayudarte hoy?
               </h2>
               <p className="text-sm text-slate-400 mt-1.5 leading-relaxed">
-                Proceso cualquier tipo de archivo: arrastra o adjunta PDFs, Word, Excel, PowerPoint, imágenes de tareas, notas de audio, o pide investigaciones web y automatizaciones de Windows.
+                Asistente autónomo multimodal. Crea o procesa cualquier documento (Word, Excel, PowerPoint, PDF), imágenes, gráficos, audio, video o tareas en Windows.
               </p>
             </div>
 
@@ -213,7 +275,7 @@ export default function ChatArea({
                 <button
                   key={i}
                   onClick={() => onSendMessage(qp.prompt)}
-                  className="p-3 rounded-xl bg-surface hover:bg-surfaceHover border border-border hover:border-slate-700 text-left transition group"
+                  className="p-3 rounded-xl bg-surface hover:bg-surfaceHover border border-border hover:border-slate-700 text-left transition group shadow-sm"
                 >
                   <span className="text-xs font-semibold text-slate-200 group-hover:text-blue-400 block mb-1">
                     {qp.label}
@@ -229,13 +291,13 @@ export default function ChatArea({
           messages.map((msg, index) => (
             <div
               key={index}
-              className={`flex items-start space-x-3 max-w-3xl ${
+              className={`flex items-start space-x-3 max-w-3xl group ${
                 msg.role === 'user' ? 'ml-auto flex-row-reverse space-x-reverse' : 'mr-auto'
               }`}
             >
               {/* Avatar */}
               <div
-                className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm ${
                   msg.role === 'user'
                     ? 'bg-blue-600 text-white'
                     : 'bg-surface border border-border text-blue-400'
@@ -245,17 +307,28 @@ export default function ChatArea({
               </div>
 
               {/* Content Bubble */}
-              <div className="flex-1 space-y-2">
+              <div className="flex-1 space-y-2 relative">
                 <div
-                  className={`p-4 rounded-2xl text-sm leading-relaxed ${
+                  className={`p-4 rounded-2xl text-sm leading-relaxed relative ${
                     msg.role === 'user'
                       ? 'bg-blue-600 text-white rounded-tr-sm'
-                      : 'bg-surface text-slate-200 border border-border rounded-tl-sm'
+                      : 'bg-surface text-slate-200 border border-border rounded-tl-sm shadow-sm'
                   }`}
                 >
                   <div className="whitespace-pre-wrap">
                     {msg.content.replace(/```action[\s\S]*?```/g, '').trim()}
                   </div>
+
+                  {/* Copy button for assistant */}
+                  {msg.role === 'assistant' && (
+                    <button
+                      onClick={() => copyToClipboard(msg.content, index)}
+                      className="absolute top-2 right-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition"
+                      title="Copiar texto"
+                    >
+                      {copiedIndex === index ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                    </button>
+                  )}
                 </div>
 
                 {/* Render any associated actions / tool executions */}
@@ -272,13 +345,13 @@ export default function ChatArea({
                             onClick={() => toggleAction(`${index}-${aIdx}`)}
                             className="w-full flex items-center justify-between px-3 py-2 text-slate-300 hover:text-white hover:bg-surfaceHover transition text-left"
                           >
-                            <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-2 truncate mr-2">
                               {renderToolIcon(act.tool)}
-                              <span className="font-medium text-slate-200">
+                              <span className="font-medium text-slate-200 truncate">
                                 {renderToolTitle(act.tool, act.params || {})}
                               </span>
                             </div>
-                            <div className="flex items-center space-x-1.5 text-slate-400">
+                            <div className="flex items-center space-x-1.5 text-slate-400 flex-shrink-0">
                               <span className="text-[10px] text-emerald-400 font-mono">Completado</span>
                               {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                             </div>
@@ -302,17 +375,17 @@ export default function ChatArea({
         {/* Live Streaming Message */}
         {isStreaming && (
           <div className="flex items-start space-x-3 max-w-3xl mr-auto">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-surface border border-border text-blue-400">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-surface border border-border text-blue-400 shadow-sm">
               <Bot size={16} />
             </div>
             <div className="flex-1 space-y-2">
-              <div className="p-4 rounded-2xl rounded-tl-sm text-sm leading-relaxed bg-surface text-slate-200 border border-border">
+              <div className="p-4 rounded-2xl rounded-tl-sm text-sm leading-relaxed bg-surface text-slate-200 border border-border shadow-sm">
                 <div className="whitespace-pre-wrap">
                   {currentStreamContent.replace(/```action[\s\S]*?```/g, '').trim()}
                 </div>
                 <div className="flex items-center space-x-2 text-blue-400 text-xs mt-2 font-medium">
                   <Loader2 size={12} className="animate-spin" />
-                  <span>Procesando solicitud multimodal...</span>
+                  <span>Procesando...</span>
                 </div>
               </div>
 
@@ -324,13 +397,13 @@ export default function ChatArea({
                       key={i}
                       className="flex items-center justify-between px-3 py-2 rounded-lg border border-blue-500/30 bg-blue-950/20 text-xs"
                     >
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 truncate mr-2">
                         {renderToolIcon(act.tool)}
-                        <span className="font-medium text-blue-200">
+                        <span className="font-medium text-blue-200 truncate">
                           {renderToolTitle(act.tool, act.params || {})}
                         </span>
                       </div>
-                      <Loader2 size={12} className="animate-spin text-blue-400" />
+                      <Loader2 size={12} className="animate-spin text-blue-400 flex-shrink-0" />
                     </div>
                   ))}
                 </div>
@@ -354,7 +427,7 @@ export default function ChatArea({
                   className="flex items-center space-x-1.5 bg-surface border border-border px-2.5 py-1 rounded-lg text-xs text-slate-200 shadow-sm"
                 >
                   {getAttachmentIcon(att.name)}
-                  <span className="truncate max-w-[200px]">{att.name}</span>
+                  <span className="truncate max-w-[200px]" title={att.name}>{att.name}</span>
                   <button
                     onClick={() => removeAttachment(i)}
                     className="p-0.5 hover:bg-surfaceHover rounded text-slate-400 hover:text-white"
@@ -366,44 +439,58 @@ export default function ChatArea({
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="relative flex items-center">
+          <form onSubmit={handleSubmit} className="relative flex items-end">
             {/* Attach File Button */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={!activeProject || isStreaming}
-              className="absolute left-3 p-1.5 text-slate-400 hover:text-blue-400 transition rounded-lg hover:bg-surfaceHover disabled:opacity-40"
-              title="Adjuntar archivo multimodal (PDF, Imagen, Word, Excel, Audio...)"
+              className="absolute left-3 bottom-3 p-1.5 text-slate-400 hover:text-blue-400 transition rounded-lg hover:bg-surfaceHover disabled:opacity-40"
+              title="Adjuntar archivo (PDF, Imagen, Word, Excel, Audio, Video...)"
             >
               <Paperclip size={18} />
             </button>
 
+            {/* Auto-expanding textarea */}
             <textarea
+              ref={textareaRef}
               rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
                 activeProject
-                  ? `Arrastra cualquier archivo o pide lo que sea en ${activeProject}...`
+                  ? `Pide cualquier tarea o arrastra archivos en ${activeProject}...`
                   : 'Selecciona o crea un proyecto para comenzar...'
               }
               disabled={!activeProject || isStreaming}
-              className="w-full bg-surface border border-border rounded-xl pl-12 pr-16 py-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition"
+              className="w-full bg-surface border border-border rounded-xl pl-12 pr-16 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition leading-normal max-h-40 overflow-y-auto"
             />
 
-            <div className="absolute right-2 flex items-center space-x-1">
-              <button
-                type="submit"
-                disabled={(!input.trim() && attachments.length === 0) || isStreaming || !activeProject}
-                className={`p-2.5 rounded-lg transition ${
-                  (input.trim() || attachments.length > 0) && !isStreaming && activeProject
-                    ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md'
-                    : 'bg-surfaceHover text-slate-600 cursor-not-allowed'
-                }`}
-              >
-                {isStreaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-              </button>
+            <div className="absolute right-2 bottom-2.5 flex items-center space-x-1">
+              {isStreaming ? (
+                <button
+                  type="button"
+                  onClick={onStopGeneration}
+                  className="p-2 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/40 transition"
+                  title="Detener respuesta"
+                >
+                  <Square size={16} className="fill-current" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={(!input.trim() && attachments.length === 0) || !activeProject}
+                  className={`p-2 rounded-lg transition ${
+                    (input.trim() || attachments.length > 0) && activeProject
+                      ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md'
+                      : 'bg-surfaceHover text-slate-600 cursor-not-allowed'
+                  }`}
+                  title="Enviar (Enter)"
+                >
+                  <Send size={16} />
+                </button>
+              )}
             </div>
           </form>
         </div>

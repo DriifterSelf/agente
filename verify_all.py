@@ -162,6 +162,9 @@ try:
     print(f"  [OK] Herramienta Web: Estado '{web_res.get('status')}'")
 
     # B. Sandbox execution
+    target_out = os.path.join(test_proj_dir, 'resultado_calculo.txt')
+    if os.path.exists(target_out):
+        os.remove(target_out)
     code_test = "with open('resultado_calculo.txt', 'w') as f: f.write('Calculo completado: 42')"
     sandbox_res = SandboxTools.execute_code(test_proj_dir, code_test)
     assert sandbox_res["status"] == "success"

@@ -1,17 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { Minus, Square, X, Cpu, Sparkles, RefreshCw, DownloadCloud, Check } from 'lucide-react';
+import { Minus, Square, Copy, X, Cpu, Sparkles, RefreshCw, DownloadCloud, Check } from 'lucide-react';
 
-export default function TitleBar({ activeProject, systemStatus }) {
+export default function TitleBar({ activeProject, systemStatus, isBackendConnected }) {
   const [updateStatus, setUpdateStatus] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
+  const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
-    // Listen to Electron OTA auto-updater events if running inside Electron
-    if (window.electronAPI && window.electronAPI.onUpdateStatus) {
-      window.electronAPI.onUpdateStatus((data) => {
-        setUpdateStatus(data);
-      });
+    // Listen to Electron window state
+    if (window.electronAPI) {
+      if (window.electronAPI.onUpdateStatus) {
+        window.electronAPI.onUpdateStatus((data) => {
+          setUpdateStatus(data);
+        });
+      }
+      if (window.electronAPI.onMaximizedChange) {
+        window.electronAPI.onMaximizedChange((maximized) => {
+          setIsMaximized(maximized);
+        });
+      }
+      if (window.electronAPI.isMaximized) {
+        window.electronAPI.isMaximized().then((maximized) => {
+          setIsMaximized(maximized);
+        });
+      }
     }
   }, []);
 
@@ -68,20 +81,31 @@ export default function TitleBar({ activeProject, systemStatus }) {
 
   return (
     <div className="h-10 bg-[#070A0F] border-b border-border flex items-center justify-between select-none drag-region px-3 z-50">
-      {/* Brand & Project */}
-      <div className="flex items-center space-x-3">
-        <div className="flex items-center space-x-2 text-blue-400 font-semibold text-sm">
+      {/* Brand & Project with safe truncation */}
+      <div className="flex items-center space-x-3 overflow-hidden">
+        <div className="flex items-center space-x-2 text-blue-400 font-semibold text-sm flex-shrink-0">
           <div className="w-5 h-5 rounded bg-blue-600/20 flex items-center justify-center border border-blue-500/30">
             <Sparkles size={12} className="text-blue-400" />
           </div>
           <span className="tracking-wide text-slate-100">Agente Studio</span>
         </div>
 
-        <div className="h-4 w-[1px] bg-border" />
+        <div className="h-4 w-[1px] bg-border flex-shrink-0" />
 
-        <div className="flex items-center space-x-1.5 text-xs text-textMuted bg-surface px-2.5 py-0.5 rounded-full border border-border">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span>Proyecto: <strong className="text-slate-200">{activeProject || 'Sin selección'}</strong></span>
+        <div
+          className="flex items-center space-x-1.5 text-xs text-textMuted bg-surface px-2.5 py-0.5 rounded-full border border-border truncate max-w-[240px]"
+          title={`Proyecto activo: ${activeProject || 'Sin selección'}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+            isBackendConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-ping'
+          }`} />
+          <span className="truncate">
+            {activeProject ? (
+              <span>Proyecto: <strong className="text-slate-200">{activeProject}</strong></span>
+            ) : (
+              <span className="text-slate-400">Sin proyecto</span>
+            )}
+          </span>
         </div>
       </div>
 
@@ -93,7 +117,7 @@ export default function TitleBar({ activeProject, systemStatus }) {
           <span>
             {systemStatus?.gpu_name 
               ? `${systemStatus.gpu_name} • ${systemStatus.gpu_backend}`
-              : 'Detectando aceleración GPU...'}
+              : isBackendConnected ? 'Cargando hardware...' : 'Conectando con motor local...'}
           </span>
         </div>
 
@@ -125,7 +149,7 @@ export default function TitleBar({ activeProject, systemStatus }) {
       </div>
 
       {/* Window Controls */}
-      <div className="flex items-center no-drag space-x-1">
+      <div className="flex items-center no-drag space-x-1 flex-shrink-0">
         <button
           onClick={handleMinimize}
           className="w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition"
@@ -136,9 +160,9 @@ export default function TitleBar({ activeProject, systemStatus }) {
         <button
           onClick={handleMaximize}
           className="w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition"
-          title="Maximizar"
+          title={isMaximized ? "Restaurar" : "Maximizar"}
         >
-          <Square size={12} />
+          {isMaximized ? <Copy size={11} className="rotate-180" /> : <Square size={12} />}
         </button>
         <button
           onClick={handleClose}

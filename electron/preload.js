@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   platform: process.platform,
 
+  // Window state
+  onMaximizedChange: (callback) => ipcRenderer.on('window-maximized-change', (event, isMaximized) => callback(isMaximized)),
+  isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+
   // OTA / Auto-update APIs
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
   restartForUpdate: () => ipcRenderer.send('restart-app-for-update'),

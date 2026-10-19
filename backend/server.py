@@ -167,6 +167,14 @@ def create_project(req: NewProjectRequest):
     os.makedirs(target, exist_ok=True)
     return {"name": safe_name, "path": target, "status": "created"}
 
+@app.delete("/api/projects/{name}")
+def delete_project(name: str):
+    target = os.path.join(PROJECTS_DIR, name)
+    if not os.path.exists(target):
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    shutil.rmtree(target)
+    return {"status": "deleted", "name": name}
+
 @app.get("/api/projects/{name}/files")
 def get_project_files(name: str):
     target = os.path.join(PROJECTS_DIR, name)

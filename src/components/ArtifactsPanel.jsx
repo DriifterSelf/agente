@@ -1,17 +1,24 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   FileSpreadsheet,
   FileText,
   Presentation,
   File,
   ExternalLink,
-  Download,
-  CheckCircle2,
   FolderOpen,
-  Sparkles
+  Sparkles,
+  Copy,
+  Check,
+  Search,
+  Video,
+  Music
 } from 'lucide-react';
 
 export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFolder, activeProject }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [copiedPath, setCopiedPath] = useState(null);
+  const [openingFile, setOpeningFile] = useState(null);
+
   const getFileBadge = (filename) => {
     const ext = filename.split('.').pop().toLowerCase();
     switch (ext) {
@@ -53,7 +60,7 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
       case 'avi':
       case 'webm':
         return {
-          icon: <Presentation size={16} className="text-indigo-400" />,
+          icon: <Video size={16} className="text-indigo-400" />,
           label: 'Video',
           color: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30',
           btnHover: 'hover:bg-indigo-600 hover:text-white'
@@ -64,7 +71,7 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
       case 'ogg':
       case 'flac':
         return {
-          icon: <File size={16} className="text-pink-400" />,
+          icon: <Music size={16} className="text-pink-400" />,
           label: 'Audio',
           color: 'bg-pink-500/10 text-pink-400 border-pink-500/30',
           btnHover: 'hover:bg-pink-600 hover:text-white'
@@ -116,13 +123,29 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
     return (bytes / (k * k)).toFixed(1) + ' MB';
   };
 
+  const copyPath = (path, name) => {
+    navigator.clipboard.writeText(path);
+    setCopiedPath(name);
+    setTimeout(() => setCopiedPath(null), 2000);
+  };
+
+  const handleOpen = async (path, name) => {
+    setOpeningFile(name);
+    await onOpenFile(path);
+    setTimeout(() => setOpeningFile(null), 1000);
+  };
+
+  const filteredArtifacts = (artifacts || []).filter(art => 
+    art.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <aside className="w-80 bg-[#0D121F] border-l border-border flex flex-col h-full select-none">
       {/* Header */}
       <div className="p-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center space-x-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
           <Sparkles size={14} className="text-blue-400" />
-          <span>Artefactos y Entregables</span>
+          <span>Artefactos ({artifacts ? artifacts.length : 0})</span>
         </div>
         {activeProject && (
           <button
@@ -135,23 +158,44 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
         )}
       </div>
 
+      {/* Search Input if more than 3 artifacts */}
+      {artifacts && artifacts.length > 3 && (
+        <div className="p-2 border-b border-border bg-[#0B0F17]/40">
+          <div className="relative flex items-center">
+            <Search size={12} className="absolute left-2.5 text-slate-500 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Buscar entregables..."
+              className="w-full text-[11px] bg-background border border-border rounded-lg pl-7 pr-3 py-1 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+        </div>
+      )}
+
       {/* Artifacts List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-        {artifacts && artifacts.length > 0 ? (
-          artifacts.map((art, idx) => {
+        {filteredArtifacts.length > 0 ? (
+          filteredArtifacts.map((art, idx) => {
             const badge = getFileBadge(art.name);
+            const isCopied = copiedPath === art.name;
+            const isOpening = openingFile === art.name;
             return (
               <div
                 key={idx}
                 className="bg-surface rounded-xl p-3 border border-border hover:border-slate-700 transition shadow-sm group"
               >
                 <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center space-x-2">
-                    <div className="p-2 rounded-lg bg-background border border-border">
+                  <div className="flex items-center space-x-2 truncate mr-1">
+                    <div className="p-2 rounded-lg bg-background border border-border flex-shrink-0">
                       {badge.icon}
                     </div>
-                    <div>
-                      <h4 className="text-xs font-medium text-slate-200 line-clamp-1 group-hover:text-blue-400 transition">
+                    <div className="truncate">
+                      <h4
+                        className="text-xs font-medium text-slate-200 truncate group-hover:text-blue-400 transition"
+                        title={art.name}
+                      >
                         {art.name}
                       </h4>
                       <div className="flex items-center space-x-1.5 mt-0.5">
@@ -164,27 +208,40 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
                       </div>
                     </div>
                   </div>
+
+                  {/* Copy Path Button */}
+                  <button
+                    onClick={() => copyPath(art.path, art.name)}
+                    className="p-1 rounded hover:bg-surfaceHover text-slate-500 hover:text-slate-300 transition flex-shrink-0"
+                    title="Copiar ruta de archivo"
+                  >
+                    {isCopied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                  </button>
                 </div>
 
                 {/* Primary Action Button */}
                 <button
-                  onClick={() => onOpenFile(art.path)}
+                  onClick={() => handleOpen(art.path, art.name)}
                   className={`w-full mt-2 py-1.5 px-3 rounded-lg text-xs font-medium bg-background hover:bg-surfaceHover text-slate-200 border border-border flex items-center justify-center space-x-1.5 transition ${badge.btnHover}`}
                 >
-                  <span>Abrir en {badge.label}</span>
+                  <span>{isOpening ? 'Abriendo...' : `Abrir en ${badge.label}`}</span>
                   <ExternalLink size={12} />
                 </button>
               </div>
             );
           })
+        ) : artifacts && artifacts.length > 0 ? (
+          <div className="p-6 text-center text-slate-500 text-xs">
+            <p>No se encontraron archivos con "{searchTerm}"</p>
+          </div>
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
-            <div className="w-12 h-12 rounded-full bg-surface flex items-center justify-center border border-border mb-3">
+            <div className="w-12 h-12 rounded-full bg-surface flex items-center justify-center border border-border mb-3 shadow-inner">
               <Sparkles size={20} className="text-slate-600" />
             </div>
-            <p className="text-xs font-medium text-slate-400">Sin artefactos aún</p>
+            <p className="text-xs font-medium text-slate-400">Sin entregables aún</p>
             <p className="text-[11px] text-slate-600 mt-1 max-w-[180px]">
-              Los archivos Word, Excel o PowerPoint generados por el agente aparecerán aquí.
+              Los archivos Word, Excel, PowerPoint, imágenes o audio generados aparecerán aquí.
             </p>
           </div>
         )}
@@ -192,11 +249,13 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
 
       {/* Info footer */}
       <div className="p-3 border-t border-border bg-[#0B0F17]/60 text-[11px] text-slate-500 flex items-center justify-between">
-        <span>Archivos guardados en disco</span>
-        <span className="flex items-center space-x-1 text-emerald-400">
-          <CheckCircle2 size={11} />
-          <span>Sincronizado</span>
-        </span>
+        <span className="truncate">Sincronizado con disco</span>
+        <button
+          onClick={() => activeProject && onOpenProjectFolder(activeProject)}
+          className="text-blue-400 hover:text-blue-300 text-[10px] font-medium"
+        >
+          Explorar
+        </button>
       </div>
     </aside>
   );

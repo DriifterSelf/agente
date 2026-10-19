@@ -150,7 +150,7 @@ class OfficeTools:
                 h_run.font.name = "Segoe UI"
                 h_run.font.bold = True
                 h_run.font.size = Pt(16 if level == 1 else 13)
-                h_run.font.color.rgb = RGBColor(37, 99, 235 if level == 1 else 71, 85, 105)
+                h_run.font.color.rgb = RGBColor(37, 99, 235) if level == 1 else RGBColor(71, 85, 105)
             
             for p_text in sec.get("paragraphs", []):
                 p = doc.add_paragraph()
