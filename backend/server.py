@@ -239,8 +239,12 @@ async def chat_endpoint(req: ChatRequest):
     messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
     
     def event_stream():
-        for event in agent.process_turn(project_path, messages_dicts):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        try:
+            for event in agent.process_turn(project_path, messages_dicts):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            err_msg = f"\n\n[Error en el procesamiento: {str(e)}]"
+            yield f"data: {json.dumps({'type': 'token', 'content': err_msg}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
         
     return StreamingResponse(event_stream(), media_type="text/event-stream")

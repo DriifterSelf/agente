@@ -126,6 +126,7 @@ class MediaTools:
             "-i", audio_path,
             "-c:v", "libx264",
             "-tune", "stillimage",
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
             "-c:a", "aac",
             "-b:a", "192k",
             "-pix_fmt", "yuv420p",

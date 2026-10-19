@@ -144,6 +144,8 @@ export default function ChatArea({
     { label: '📊 Excel Financiero', prompt: 'Crea un archivo Excel con el presupuesto anual detallado, fórmulas de sumatoria y margen, y un gráfico comparativo.' },
     { label: '📄 Informe Ejecutivo Word', prompt: 'Redacta un informe ejecutivo profesional en Word sobre la estrategia de operaciones y eficiencia para este trimestre.' },
     { label: '📑 Presentación PowerPoint', prompt: 'Crea una presentación de PowerPoint de 6 diapositivas con portada, pilares estratégicos y conclusiones clave.' },
+    { label: '🎓 Tarea / Resumen Académico', prompt: 'Analiza los documentos de mi tarea y genera un reporte estructurado en Word con los conceptos clave, fórmulas y soluciones.' },
+    { label: '🎙️ Audio Narrado MP3', prompt: 'Genera un archivo de audio MP3 narrando una síntesis ejecutiva con voz neuronal clara.' },
     { label: '🌐 Búsqueda e Investigación', prompt: 'Investiga en la web las últimas tendencias de tecnología y negocios, y hazme un resumen estructurado.' }
   ];
 
