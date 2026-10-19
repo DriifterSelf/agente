@@ -1,0 +1,13 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.0.0
+requests>=2.31.0
+python-docx>=1.1.0
+openpyxl>=3.1.2
+python-pptx>=0.6.23
+duckduckgo-search>=6.0.0
+beautifulsoup4>=4.12.0
+markdownify>=0.11.6
+pandas>=2.1.0
+pillow>=10.0.0
+pypdf>=4.0.0

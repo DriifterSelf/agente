@@ -1,0 +1,77 @@
+{
+  "name": "agente-studio",
+  "version": "1.0.0",
+  "description": "Agente Autónomo de Oficina y Sistema para Windows",
+  "main": "electron/main.js",
+  "author": "Antigravity User",
+  "scripts": {
+    "dev:frontend": "vite",
+    "build:frontend": "vite build",
+    "start": "electron .",
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "build:win": "vite build && electron-builder --win",
+    "dist": "vite build && electron-builder --win -p always"
+  },
+  "build": {
+    "appId": "com.agente.studio",
+    "productName": "Agente Studio",
+    "directories": {
+      "output": "release"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "USUARIO_GITHUB",
+        "repo": "agente-studio"
+      }
+    ],
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "backend/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "projects",
+        "to": "projects"
+      },
+      {
+        "from": "models",
+        "to": "models"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Agente Studio"
+    }
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "electron-updater": "^6.3.9",
+    "lucide-react": "^0.475.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^3.0.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.2",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.5.2",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.1.0",
+    "wait-on": "^8.0.2"
+  }
+}

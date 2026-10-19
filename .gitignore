@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+venv/
+__pycache__/
+*.pyc
+
+# Distribution & Electron Build Artifacts
+release/
+*.exe
+*.zip
+*.blockmap
+
+# User projects and heavy model weights
+projects/*
+!projects/.gitkeep
+models/*.gguf
+!models/.gitkeep
+
+# Environment & Logs
+.env
+*.log
+.DS_Store
+Thumbs.db
