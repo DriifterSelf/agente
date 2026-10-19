@@ -77,13 +77,19 @@ class AutonomousAgent:
             last_msg = current_messages[-1]["content"]
             attached_fnames = re.findall(r'\[Archivo adjunto: "([^"]+)"\]', last_msg)
             injected_context = ""
+            
+            # Dynamic budget based on active RAM context (n_ctx)
+            total_budget_chars = int(getattr(self.engine, 'n_ctx', 32768) * 3.5 * 0.75)
+            num_files = max(len(attached_fnames), 1)
+            chars_per_file = max(total_budget_chars // num_files, 15000)
+
             for fname in attached_fnames:
                 fpath = os.path.join(project_path, fname)
                 if os.path.exists(fpath):
                     parsed = SystemTools.read_file_content(fpath)
                     if parsed.get("status") == "success" and parsed.get("content"):
                         injected_context += f"\n\n--- [DOCUMENTO ADJUNTO: '{fname}'] ---\n"
-                        injected_context += str(parsed.get("content"))[:120000]
+                        injected_context += str(parsed.get("content"))[:chars_per_file]
                         injected_context += f"\n--- [FIN DEL DOCUMENTO '{fname}'] ---\n"
                         
             if injected_context:

@@ -1,4 +1,5 @@
 import os
+import re
 import zipfile
 import json
 from typing import List, Dict, Any, Optional
@@ -21,10 +22,22 @@ from pptx.dml.color import RGBColor as PptxRGBColor
 
 class OfficeTools:
     @staticmethod
+    def sanitize_filename(filename: str, default_name: str = "archivo", expected_ext: str = "") -> str:
+        """Sanitizes filename against illegal Windows characters and ensures proper extension."""
+        if not filename or not str(filename).strip():
+            filename = default_name
+        # Strip illegal Windows characters: < > : " / \ | ? * and ASCII control chars
+        clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', str(filename)).strip('. ')
+        if not clean:
+            clean = default_name
+        if expected_ext and not clean.lower().endswith(expected_ext.lower()):
+            clean += expected_ext
+        return clean
+
+    @staticmethod
     def create_excel(project_path: str, filename: str, sheets_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Generates a professionally formatted Excel spreadsheet (.xlsx)."""
-        if not filename.endswith(".xlsx"):
-            filename += ".xlsx"
+        filename = OfficeTools.sanitize_filename(filename, "Libro1", ".xlsx")
         full_path = os.path.join(project_path, filename)
         
         wb = openpyxl.Workbook()
@@ -111,8 +124,7 @@ class OfficeTools:
     @staticmethod
     def create_word(project_path: str, filename: str, title: str, subtitle: Optional[str], sections: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Generates a formatted Word document (.docx)."""
-        if not filename.endswith(".docx"):
-            filename += ".docx"
+        filename = OfficeTools.sanitize_filename(filename, "Documento", ".docx")
         full_path = os.path.join(project_path, filename)
         
         doc = docx.Document()
@@ -238,8 +250,7 @@ class OfficeTools:
     @staticmethod
     def create_powerpoint(project_path: str, filename: str, title: str, subtitle: Optional[str], slides_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Generates a modern 16:9 widescreen presentation (.pptx)."""
-        if not filename.endswith(".pptx"):
-            filename += ".pptx"
+        filename = OfficeTools.sanitize_filename(filename, "Presentacion", ".pptx")
         full_path = os.path.join(project_path, filename)
         
         prs = Presentation()
@@ -336,8 +347,7 @@ class OfficeTools:
     @staticmethod
     def create_pdf(project_path: str, filename: str, title: str, subtitle: Optional[str], content_paragraphs: List[str], tables: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Generates a polished PDF document directly with ReportLab."""
-        if not filename.endswith(".pdf"):
-            filename += ".pdf"
+        filename = OfficeTools.sanitize_filename(filename, "Documento", ".pdf")
         full_path = os.path.join(project_path, filename)
         
         from reportlab.lib.pagesizes import letter
@@ -375,6 +385,22 @@ class OfficeTools:
             textColor=colors.HexColor('#334155'),
             spaceAfter=10
         )
+        table_cell_style = ParagraphStyle(
+            'TableCellStyle',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor('#334155')
+        )
+        table_hdr_style = ParagraphStyle(
+            'TableHdrStyle',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=9.5,
+            leading=13,
+            textColor=colors.white
+        )
         
         story = []
         story.append(Paragraph(title, title_style))
@@ -389,7 +415,12 @@ class OfficeTools:
             for tbl in tables:
                 headers = tbl.get("headers", [])
                 rows = tbl.get("rows", [])
-                table_data = [headers] + rows
+                formatted_headers = [Paragraph(str(h), table_hdr_style) for h in headers]
+                formatted_rows = [
+                    [Paragraph(str(val), table_cell_style) for val in row]
+                    for row in rows
+                ]
+                table_data = [formatted_headers] + formatted_rows
                 t = Table(table_data)
                 t.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E293B')),
@@ -419,8 +450,7 @@ class OfficeTools:
     @staticmethod
     def create_chart_image(project_path: str, filename: str, chart_type: str, title: str, labels: List[str], values: List[float], x_label: str = "", y_label: str = "") -> Dict[str, Any]:
         """Generates a high-resolution PNG chart image using Matplotlib."""
-        if not filename.endswith(".png"):
-            filename += ".png"
+        filename = OfficeTools.sanitize_filename(filename, "grafico", ".png")
         full_path = os.path.join(project_path, filename)
         
         import matplotlib
@@ -447,7 +477,7 @@ class OfficeTools:
             plt.title(title, color='#F8FAFC', fontsize=14, fontweight='bold', pad=15)
             plt.savefig(full_path, dpi=200, bbox_inches='tight', facecolor='#0F172A')
             plt.close()
-            return {"status": "success", "file_name": filename, "full_path": full_path}
+            return {"status": "success", "file_name": filename, "full_path": full_path, "message": f"Gráfico circular '{filename}' generado con éxito."}
             
         ax.set_title(title, color='#F8FAFC', fontsize=14, fontweight='bold', pad=15)
         if x_label: ax.set_xlabel(x_label, color='#94A3B8', fontsize=10)
@@ -470,6 +500,7 @@ class OfficeTools:
     @staticmethod
     def create_file(project_path: str, filename: str, content: str) -> Dict[str, Any]:
         """Creates any text or formatted data file (.json, .csv, .html, .xml, .py, .sql, .md, .txt, .yaml)."""
+        filename = OfficeTools.sanitize_filename(filename, "archivo.txt")
         full_path = os.path.join(project_path, filename)
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
@@ -482,13 +513,19 @@ class OfficeTools:
 
     @staticmethod
     def create_zip(project_path: str, archive_name: str, files_to_include: List[str]) -> Dict[str, Any]:
-        """Packages files into a .zip archive."""
-        if not archive_name.endswith(".zip"):
-            archive_name += ".zip"
+        """Packages files into a .zip archive. If files_to_include is empty, packages all files in project."""
+        archive_name = OfficeTools.sanitize_filename(archive_name, "entrega", ".zip")
         full_path = os.path.join(project_path, archive_name)
         
+        target_files = list(files_to_include or [])
+        if not target_files and os.path.exists(project_path):
+            target_files = [
+                f.name for f in os.scandir(project_path)
+                if f.is_file() and not f.name.lower().endswith(".zip") and f.name != archive_name
+            ]
+        
         with zipfile.ZipFile(full_path, "w", zipfile.ZIP_DEFLATED) as z:
-            for f_name in files_to_include:
+            for f_name in target_files:
                 f_path = os.path.join(project_path, f_name)
                 if os.path.exists(f_path):
                     z.write(f_path, arcname=f_name)
@@ -497,5 +534,5 @@ class OfficeTools:
             "status": "success",
             "file_name": archive_name,
             "full_path": full_path,
-            "message": f"Archivo comprimido '{archive_name}' creado con {len(files_to_include)} archivos."
+            "message": f"Archivo comprimido '{archive_name}' creado con {len(target_files)} archivos."
         }

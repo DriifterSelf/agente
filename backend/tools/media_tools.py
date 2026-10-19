@@ -1,7 +1,16 @@
 import os
+import re
 import subprocess
 import asyncio
 from typing import Dict, Any, Optional
+
+def _sanitize_filename(filename: str, default_name: str, expected_ext: str = "") -> str:
+    clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', str(filename or '')).strip('. ')
+    if not clean:
+        clean = default_name
+    if expected_ext and not clean.lower().endswith(expected_ext.lower()):
+        clean += expected_ext
+    return clean
 
 class MediaTools:
     @staticmethod
@@ -10,8 +19,7 @@ class MediaTools:
         Generates crystal-clear neural speech audio (.mp3) from text.
         Voices: 'es-MX-DaliaNeural' (female), 'es-MX-JorgeNeural' (male), 'es-ES-AlvaroNeural' (male)
         """
-        if not filename.endswith(".mp3"):
-            filename += ".mp3"
+        filename = _sanitize_filename(filename, "audio", ".mp3")
         full_path = os.path.join(project_path, filename)
         
         async def _speak():
@@ -55,6 +63,7 @@ class MediaTools:
             base = os.path.splitext(video_filename)[0]
             output_audio_filename = f"{base}_audio.mp3"
             
+        output_audio_filename = _sanitize_filename(output_audio_filename, "audio_extraido", ".mp3")
         output_path = os.path.join(project_path, output_audio_filename)
         
         cmd = [
@@ -109,8 +118,7 @@ class MediaTools:
         """
         Combines an image/slide with an audio narration to produce an MP4 video.
         """
-        if not output_video.endswith(".mp4"):
-            output_video += ".mp4"
+        output_video = _sanitize_filename(output_video, "video_final", ".mp4")
             
         img_path = os.path.join(project_path, image_filename)
         audio_path = os.path.join(project_path, audio_filename)

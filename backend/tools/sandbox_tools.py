@@ -23,12 +23,15 @@ class SandboxTools:
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(code)
                 
-            # Execute with current python executable
+            # Execute with current python executable with UTF-8 encoding protection
+            exec_env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
             result = subprocess.run(
                 [sys.executable, script_path],
                 cwd=project_path,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=exec_env,
                 timeout=timeout_seconds
             )
             
