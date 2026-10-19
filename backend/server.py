@@ -174,6 +174,27 @@ def get_project_files(name: str):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return SystemTools.list_files(target)
 
+from fastapi import File, UploadFile
+import shutil
+
+@app.post("/api/projects/{name}/upload")
+async def upload_project_file(name: str, file: UploadFile = File(...)):
+    target_dir = os.path.join(PROJECTS_DIR, name)
+    os.makedirs(target_dir, exist_ok=True)
+    file_path = os.path.join(target_dir, file.filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    # Analyze uploaded file immediately with multimodal reader
+    parsed = SystemTools.read_file_content(file_path)
+    return {
+        "status": "success",
+        "file_name": file.filename,
+        "path": file_path,
+        "parsed_preview": parsed
+    }
+
 @app.post("/api/projects/{name}/open-folder")
 def open_project_folder(name: str):
     target = os.path.join(PROJECTS_DIR, name)

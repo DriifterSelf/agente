@@ -11,7 +11,12 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  Paperclip
+  Paperclip,
+  X,
+  File,
+  Image as ImageIcon,
+  Music,
+  Archive
 } from 'lucide-react';
 
 export default function ChatArea({
@@ -20,10 +25,15 @@ export default function ChatArea({
   isStreaming,
   currentStreamContent,
   activeActions,
-  activeProject
+  activeProject,
+  onUploadFile
 }) {
   const [input, setInput] = useState('');
   const [expandedActions, setExpandedActions] = useState({});
+  const [attachments, setAttachments] = useState([]);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -36,9 +46,15 @@ export default function ChatArea({
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (input.trim() && !isStreaming) {
-      onSendMessage(input.trim());
+    if ((input.trim() || attachments.length > 0) && !isStreaming) {
+      let finalPrompt = input.trim();
+      if (attachments.length > 0) {
+        const attachInfo = attachments.map(a => `[Archivo adjunto: "${a.name}"]`).join(', ');
+        finalPrompt = `${attachInfo}\n\n${finalPrompt || 'Por favor procesa y analiza estos archivos adjuntos.'}`;
+      }
+      onSendMessage(finalPrompt);
       setInput('');
+      setAttachments([]);
     }
   };
 
@@ -47,6 +63,48 @@ export default function ChatArea({
       e.preventDefault();
       handleSubmit(e);
     }
+  };
+
+  const handleFileSelect = async (e) => {
+    const files = Array.from(e.target.files || []);
+    for (const file of files) {
+      await handleUpload(file);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    for (const file of files) {
+      await handleUpload(file);
+    }
+  };
+
+  const handleUpload = async (file) => {
+    if (!activeProject || !onUploadFile) return;
+    try {
+      const res = await onUploadFile(file);
+      if (res && res.status === 'success') {
+        setAttachments(prev => [...prev, { name: file.name, size: file.size, type: file.type }]);
+      }
+    } catch (err) {
+      console.error('Error uploading file:', err);
+    }
+  };
+
+  const removeAttachment = (index) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
   const toggleAction = (idx) => {
@@ -93,8 +151,46 @@ export default function ChatArea({
     }
   };
 
+  const getAttachmentIcon = (name) => {
+    const ext = name.split('.').pop().toLowerCase();
+    if (['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext)) return <ImageIcon size={13} className="text-purple-400" />;
+    if (['pdf', 'docx', 'doc', 'txt'].includes(ext)) return <FileText size={13} className="text-blue-400" />;
+    if (['xlsx', 'xls', 'csv'].includes(ext)) return <FileSpreadsheet size={13} className="text-emerald-400" />;
+    if (['pptx', 'ppt'].includes(ext)) return <Presentation size={13} className="text-amber-400" />;
+    if (['mp3', 'wav', 'm4a'].includes(ext)) return <Music size={13} className="text-rose-400" />;
+    if (['zip', 'rar'].includes(ext)) return <Archive size={13} className="text-yellow-400" />;
+    return <File size={13} className="text-slate-400" />;
+  };
+
   return (
-    <main className="flex-1 flex flex-col h-full bg-[#0B0F17] relative">
+    <main
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`flex-1 flex flex-col h-full bg-[#0B0F17] relative transition-colors ${
+        isDragging ? 'border-2 border-dashed border-blue-500/80 bg-blue-950/10' : ''
+      }`}
+    >
+      {/* Hidden File Input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileSelect}
+        multiple
+        className="hidden"
+      />
+
+      {/* Drag Overlay Notice */}
+      {isDragging && (
+        <div className="absolute inset-0 z-40 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-none">
+          <div className="p-4 rounded-2xl bg-blue-600/20 border border-blue-500/40 text-blue-400 flex flex-col items-center space-y-2">
+            <Paperclip size={32} className="animate-bounce" />
+            <p className="text-sm font-semibold text-slate-100">Suelta los archivos aquí</p>
+            <p className="text-xs text-slate-400">PDFs, Word, Excel, PowerPoint, Imágenes, Audio, ZIP...</p>
+          </div>
+        </div>
+      )}
+
       {/* Messages Thread */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
         {messages.length === 0 ? (
@@ -104,10 +200,10 @@ export default function ChatArea({
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-100">
-                ¿En qué puedo ayudarte hoy?
+                Asistente Multimodal Activo
               </h2>
               <p className="text-sm text-slate-400 mt-1.5 leading-relaxed">
-                Soy tu asistente digital local. Puedo crear y editar hojas de Excel con fórmulas, documentos Word con diseño profesional, presentaciones de PowerPoint, investigar en internet y gestionar tus tareas en Windows.
+                Proceso cualquier tipo de archivo: arrastra o adjunta PDFs, Word, Excel, PowerPoint, imágenes de tareas, notas de audio, o pide investigaciones web y automatizaciones de Windows.
               </p>
             </div>
 
@@ -157,7 +253,6 @@ export default function ChatArea({
                       : 'bg-surface text-slate-200 border border-border rounded-tl-sm'
                   }`}
                 >
-                  {/* Clean up raw ```action blocks from user view for high-end UX */}
                   <div className="whitespace-pre-wrap">
                     {msg.content.replace(/```action[\s\S]*?```/g, '').trim()}
                   </div>
@@ -217,7 +312,7 @@ export default function ChatArea({
                 </div>
                 <div className="flex items-center space-x-2 text-blue-400 text-xs mt-2 font-medium">
                   <Loader2 size={12} className="animate-spin" />
-                  <span>Procesando solicitud...</span>
+                  <span>Procesando solicitud multimodal...</span>
                 </div>
               </div>
 
@@ -247,36 +342,71 @@ export default function ChatArea({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Bar */}
+      {/* Input Bar & Attachments */}
       <div className="p-4 bg-[#070A0F] border-t border-border">
-        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative flex items-center">
-          <textarea
-            rows={1}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              activeProject
-                ? `Pide cualquier tarea en ${activeProject} (Word, Excel, PowerPoint, Web)...`
-                : 'Selecciona o crea un proyecto para comenzar...'
-            }
-            disabled={!activeProject || isStreaming}
-            className="w-full bg-surface border border-border rounded-xl px-4 py-3.5 pr-20 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition"
-          />
-          <div className="absolute right-2 flex items-center space-x-1">
+        <div className="max-w-4xl mx-auto space-y-2">
+          {/* Attachment Chips */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-1">
+              {attachments.map((att, i) => (
+                <div
+                  key={i}
+                  className="flex items-center space-x-1.5 bg-surface border border-border px-2.5 py-1 rounded-lg text-xs text-slate-200 shadow-sm"
+                >
+                  {getAttachmentIcon(att.name)}
+                  <span className="truncate max-w-[200px]">{att.name}</span>
+                  <button
+                    onClick={() => removeAttachment(i)}
+                    className="p-0.5 hover:bg-surfaceHover rounded text-slate-400 hover:text-white"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="relative flex items-center">
+            {/* Attach File Button */}
             <button
-              type="submit"
-              disabled={!input.trim() || isStreaming || !activeProject}
-              className={`p-2.5 rounded-lg transition ${
-                input.trim() && !isStreaming && activeProject
-                  ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md'
-                  : 'bg-surfaceHover text-slate-600 cursor-not-allowed'
-              }`}
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!activeProject || isStreaming}
+              className="absolute left-3 p-1.5 text-slate-400 hover:text-blue-400 transition rounded-lg hover:bg-surfaceHover disabled:opacity-40"
+              title="Adjuntar archivo multimodal (PDF, Imagen, Word, Excel, Audio...)"
             >
-              {isStreaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+              <Paperclip size={18} />
             </button>
-          </div>
-        </form>
+
+            <textarea
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                activeProject
+                  ? `Arrastra cualquier archivo o pide lo que sea en ${activeProject}...`
+                  : 'Selecciona o crea un proyecto para comenzar...'
+              }
+              disabled={!activeProject || isStreaming}
+              className="w-full bg-surface border border-border rounded-xl pl-12 pr-16 py-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition"
+            />
+
+            <div className="absolute right-2 flex items-center space-x-1">
+              <button
+                type="submit"
+                disabled={(!input.trim() && attachments.length === 0) || isStreaming || !activeProject}
+                className={`p-2.5 rounded-lg transition ${
+                  (input.trim() || attachments.length > 0) && !isStreaming && activeProject
+                    ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md'
+                    : 'bg-surfaceHover text-slate-600 cursor-not-allowed'
+                }`}
+              >
+                {isStreaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </main>
   );

@@ -111,6 +111,26 @@ export default function App() {
     }
   };
 
+  const handleUploadFile = async (file) => {
+    if (!activeProject) return;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(activeProject)}/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      if (res.ok) {
+        await fetchProjectFiles(activeProject);
+        return await res.json();
+      }
+    } catch (e) {
+      console.error('Error uploading file:', e);
+    }
+    return { status: 'error' };
+  };
+
   const handleOpenFile = async (filePath) => {
     try {
       // First try via Electron native IPC if available
@@ -246,6 +266,7 @@ export default function App() {
           currentStreamContent={currentStreamContent}
           activeActions={activeActions}
           activeProject={activeProject}
+          onUploadFile={handleUploadFile}
         />
 
         {/* Right: Artifacts & Deliverables (.xlsx, .docx, .pptx) */}
