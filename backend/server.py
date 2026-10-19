@@ -9,8 +9,9 @@ if ROOT_DIR not in sys.path:
 import json
 import subprocess
 import psutil
+import shutil
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
@@ -196,9 +197,6 @@ def get_project_files(name: str):
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return SystemTools.list_files(target)
-
-from fastapi import File, UploadFile
-import shutil
 
 @app.post("/api/projects/{name}/upload")
 async def upload_project_file(name: str, file: UploadFile = File(...)):

@@ -84,18 +84,32 @@ class AutonomousAgent:
                 yield {"type": "action_end", "tool": tool_name, "result": result}
                 
                 # Check if an artifact was created
-                if result.get("status") == "success" and "file_name" in result:
-                    full_p = result.get("full_path") or os.path.join(project_path, result["file_name"])
-                    size = os.path.getsize(full_p) if os.path.exists(full_p) else 0
-                    yield {
-                        "type": "artifact_created",
-                        "file": {
-                            "name": result["file_name"],
-                            "path": full_p,
-                            "size": size,
-                            "ext": os.path.splitext(result["file_name"])[1].lower()
+                if result.get("status") == "success":
+                    if "file_name" in result:
+                        full_p = result.get("full_path") or os.path.join(project_path, result["file_name"])
+                        size = os.path.getsize(full_p) if os.path.exists(full_p) else 0
+                        yield {
+                            "type": "artifact_created",
+                            "file": {
+                                "name": result["file_name"],
+                                "path": full_p,
+                                "size": size,
+                                "ext": os.path.splitext(result["file_name"])[1].lower()
+                            }
                         }
-                    }
+                    elif "new_files" in result and isinstance(result["new_files"], list):
+                        for nf in result["new_files"]:
+                            full_p = os.path.join(project_path, nf)
+                            size = os.path.getsize(full_p) if os.path.exists(full_p) else 0
+                            yield {
+                                "type": "artifact_created",
+                                "file": {
+                                    "name": nf,
+                                    "path": full_p,
+                                    "size": size,
+                                    "ext": os.path.splitext(nf)[1].lower()
+                                }
+                            }
             except Exception as e:
                 yield {"type": "action_error", "error": str(e)}
 
