@@ -16,8 +16,14 @@ from backend.tools.sandbox_tools import SandboxTools
 from backend.engine import InferenceEngine
 
 SYSTEM_PROMPT = """Eres el Agente Autónomo de Oficina y Sistema, un asistente ejecutivo de alta capacidad que corre localmente en Windows.
-Tu objetivo es resolver completamente cualquier solicitud del usuario: crear y modificar documentos (Word, Excel, PowerPoint), navegar e investigar en la web, procesar datos y administrar archivos en Windows.
-NO eres un asistente de programación; el usuario no quiere código, quiere resultados tangibles (archivos profesionales listos para usar).
+Tu objetivo es resolver completamente cualquier solicitud del usuario creando cualquier tipo de archivo que requiera:
+- Documentos de texto (.docx, .pdf, .txt, .md)
+- Hojas de cálculo y modelos (.xlsx, .csv)
+- Presentaciones de diapositivas (.pptx)
+- Gráficos e infografías en imagen (.png, .jpg)
+- Archivos estructurados (.json, .xml, .html, .sql, .yaml)
+- Paquetes comprimidos (.zip)
+- Cualquier archivo arbitrario mediante ejecución de tareas en segundo plano.
 
 Cuando necesites realizar una acción, genera un bloque de acción JSON con este formato exacto:
 ```action
@@ -27,16 +33,19 @@ Cuando necesites realizar una acción, genera un bloque de acción JSON con este
 }
 ```
 
-Herramientas disponibles:
-1. `create_excel`: {"filename": "nombre.xlsx", "sheets": [{"sheet_name": "...", "headers": [...], "rows": [...], "create_chart": true/false, "chart_title": "..."}]}
-2. `create_word`: {"filename": "nombre.docx", "title": "...", "subtitle": "...", "sections": [{"heading": "...", "level": 1, "paragraphs": [...], "bullet_points": [...], "callout": "...", "table": {"headers": [...], "rows": [...]}}]}
-3. `create_powerpoint`: {"filename": "nombre.pptx", "title": "...", "subtitle": "...", "slides": [{"title": "...", "bullets": [...], "highlight": "..."}]}
-4. `web_search`: {"query": "termino de busqueda"}
-5. `fetch_page`: {"url": "https://..."}
-6. `read_file`: {"file_path": "ruta/o/nombre"}
-7. `execute_task`: {"code": "# script en python para procesar datos, convertir archivos o resolver tareas complejas"}
+Herramientas de creación disponibles:
+1. `create_excel`: {"filename": "nombre.xlsx", "sheets": [{"sheet_name": "...", "headers": [...], "rows": [...], "create_chart": true/false}]}
+2. `create_word`: {"filename": "nombre.docx", "title": "...", "subtitle": "...", "sections": [...]}
+3. `create_powerpoint`: {"filename": "nombre.pptx", "title": "...", "subtitle": "...", "slides": [...]}
+4. `create_pdf`: {"filename": "nombre.pdf", "title": "...", "subtitle": "...", "content_paragraphs": [...], "tables": [...]}
+5. `create_chart_image`: {"filename": "grafico.png", "chart_type": "bar/line/pie", "title": "...", "labels": [...], "values": [...], "x_label": "...", "y_label": "..."}
+6. `create_file`: {"filename": "datos.json/csv/html/md", "content": "..."}
+7. `create_zip`: {"archive_name": "entrega.zip", "files_to_include": ["archivo1.docx", "archivo2.xlsx"]}
+8. `web_search`: {"query": "termino de busqueda"}
+9. `read_file`: {"file_path": "ruta/o/nombre"}
+10. `execute_task`: {"code": "# script en python para procesar datos o generar archivos complejos"}
 
-Sé proactivo, ejecutivo, detallista en el diseño de los documentos y presenta siempre un trabajo pulcro y profesional.
+Sé proactivo, detallista y entrega siempre archivos profesionales listos para abrirse en Windows.
 """
 
 class AutonomousAgent:
@@ -111,6 +120,38 @@ class AutonomousAgent:
                 title=params.get("title", "Presentación"),
                 subtitle=params.get("subtitle"),
                 slides_data=params.get("slides", [])
+            )
+        elif tool_name == "create_pdf":
+            return OfficeTools.create_pdf(
+                project_path=project_path,
+                filename=params.get("filename", "Documento.pdf"),
+                title=params.get("title", "Documento PDF"),
+                subtitle=params.get("subtitle"),
+                content_paragraphs=params.get("content_paragraphs", []),
+                tables=params.get("tables")
+            )
+        elif tool_name == "create_chart_image":
+            return OfficeTools.create_chart_image(
+                project_path=project_path,
+                filename=params.get("filename", "grafico.png"),
+                chart_type=params.get("chart_type", "bar"),
+                title=params.get("title", "Gráfico"),
+                labels=params.get("labels", []),
+                values=params.get("values", []),
+                x_label=params.get("x_label", ""),
+                y_label=params.get("y_label", "")
+            )
+        elif tool_name == "create_file":
+            return OfficeTools.create_file(
+                project_path=project_path,
+                filename=params.get("filename", "archivo.txt"),
+                content=params.get("content", "")
+            )
+        elif tool_name == "create_zip":
+            return OfficeTools.create_zip(
+                project_path=project_path,
+                archive_name=params.get("archive_name", "paquete.zip"),
+                files_to_include=params.get("files_to_include", [])
             )
         elif tool_name == "web_search":
             return WebTools.search(params.get("query", ""))

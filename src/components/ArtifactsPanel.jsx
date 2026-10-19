@@ -40,12 +40,49 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
           color: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
           btnHover: 'hover:bg-amber-600 hover:text-white'
         };
-      default:
+      case 'pdf':
+        return {
+          icon: <FileText size={16} className="text-rose-400" />,
+          label: 'PDF',
+          color: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
+          btnHover: 'hover:bg-rose-600 hover:text-white'
+        };
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'webp':
+      case 'bmp':
         return {
           icon: <File size={16} className="text-purple-400" />,
-          label: ext.toUpperCase(),
+          label: 'Imagen',
           color: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
           btnHover: 'hover:bg-purple-600 hover:text-white'
+        };
+      case 'zip':
+      case 'rar':
+        return {
+          icon: <FolderOpen size={16} className="text-yellow-400" />,
+          label: 'ZIP',
+          color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
+          btnHover: 'hover:bg-yellow-600 hover:text-white'
+        };
+      case 'json':
+      case 'xml':
+      case 'html':
+      case 'sql':
+      case 'md':
+        return {
+          icon: <File size={16} className="text-cyan-400" />,
+          label: ext.toUpperCase(),
+          color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30',
+          btnHover: 'hover:bg-cyan-600 hover:text-white'
+        };
+      default:
+        return {
+          icon: <File size={16} className="text-slate-400" />,
+          label: ext.toUpperCase(),
+          color: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
+          btnHover: 'hover:bg-slate-600 hover:text-white'
         };
     }
   };
