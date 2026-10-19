@@ -47,6 +47,28 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
           color: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
           btnHover: 'hover:bg-rose-600 hover:text-white'
         };
+      case 'mp4':
+      case 'mkv':
+      case 'mov':
+      case 'avi':
+      case 'webm':
+        return {
+          icon: <Presentation size={16} className="text-indigo-400" />,
+          label: 'Video',
+          color: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30',
+          btnHover: 'hover:bg-indigo-600 hover:text-white'
+        };
+      case 'mp3':
+      case 'wav':
+      case 'm4a':
+      case 'ogg':
+      case 'flac':
+        return {
+          icon: <File size={16} className="text-pink-400" />,
+          label: 'Audio',
+          color: 'bg-pink-500/10 text-pink-400 border-pink-500/30',
+          btnHover: 'hover:bg-pink-600 hover:text-white'
+        };
       case 'png':
       case 'jpg':
       case 'jpeg':

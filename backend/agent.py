@@ -13,6 +13,7 @@ from backend.tools.office_tools import OfficeTools
 from backend.tools.web_tools import WebTools
 from backend.tools.system_tools import SystemTools
 from backend.tools.sandbox_tools import SandboxTools
+from backend.tools.media_tools import MediaTools
 from backend.engine import InferenceEngine
 
 SYSTEM_PROMPT = """Eres el Agente Autónomo de Oficina y Sistema, un asistente ejecutivo de alta capacidad que corre localmente en Windows.
@@ -152,6 +153,32 @@ class AutonomousAgent:
                 project_path=project_path,
                 archive_name=params.get("archive_name", "paquete.zip"),
                 files_to_include=params.get("files_to_include", [])
+            )
+        elif tool_name == "generate_speech":
+            return MediaTools.generate_speech(
+                project_path=project_path,
+                filename=params.get("filename", "audio.mp3"),
+                text=params.get("text", ""),
+                voice=params.get("voice", "es-MX-DaliaNeural")
+            )
+        elif tool_name == "extract_audio":
+            return MediaTools.extract_audio(
+                project_path=project_path,
+                video_filename=params.get("video_filename", ""),
+                output_audio_filename=params.get("output_audio_filename")
+            )
+        elif tool_name == "convert_media":
+            return MediaTools.convert_media(
+                project_path=project_path,
+                input_filename=params.get("input_filename", ""),
+                output_filename=params.get("output_filename", "")
+            )
+        elif tool_name == "create_video_slideshow":
+            return MediaTools.create_video_slideshow(
+                project_path=project_path,
+                image_filename=params.get("image_filename", ""),
+                audio_filename=params.get("audio_filename", ""),
+                output_video=params.get("output_video", "video_final.mp4")
             )
         elif tool_name == "web_search":
             return WebTools.search(params.get("query", ""))

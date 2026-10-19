@@ -70,8 +70,8 @@ export default function App() {
         const files = await res.json();
         setProjectFiles(files);
         
-        // Filter out created artifacts (.xlsx, .docx, .pptx, .pdf, images, zip, data)
-        const arts = files.filter(f => !f.is_dir && /\.(xlsx|docx|pptx|pdf|csv|png|jpg|jpeg|webp|zip|json|html|md|txt)$/i.test(f.name));
+        // Filter out created artifacts (.xlsx, .docx, .pptx, .pdf, images, zip, audio, video, data)
+        const arts = files.filter(f => !f.is_dir && /\.(xlsx|docx|pptx|pdf|csv|png|jpg|jpeg|webp|zip|json|html|md|txt|mp3|wav|m4a|mp4|mkv|mov)$/i.test(f.name));
         setArtifacts(arts);
       }
     } catch (e) {
