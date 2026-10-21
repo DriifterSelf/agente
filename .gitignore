@@ -19,5 +19,10 @@ models/*.gguf
 # Environment & Logs
 .env
 *.log
+settings.json
 .DS_Store
 Thumbs.db
+
+# Local inference runtime (downloaded on demand)
+runtime/
+

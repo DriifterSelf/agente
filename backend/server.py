@@ -43,6 +43,25 @@ app.add_middleware(
 engine = InferenceEngine(models_dir=MODELS_DIR)
 agent = AutonomousAgent(engine)
 
+@app.on_event("startup")
+def on_startup():
+    engine.auto_start()
+
+@app.on_event("shutdown")
+def on_shutdown():
+    engine.stop()
+
+def _safe_project_path(name: str) -> str:
+    if not name or not isinstance(name, str):
+        raise HTTPException(status_code=400, detail="Nombre de proyecto inválido.")
+    clean = os.path.basename(name.strip())
+    if not clean or clean in (".", ".."):
+        raise HTTPException(status_code=400, detail="Nombre de proyecto inválido.")
+    target = os.path.abspath(os.path.join(PROJECTS_DIR, clean))
+    if not target.startswith(os.path.abspath(PROJECTS_DIR)):
+        raise HTTPException(status_code=400, detail="Ruta de proyecto no permitida.")
+    return target
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -64,34 +83,26 @@ class LoadModelRequest(BaseModel):
 
 class ContextSettingsRequest(BaseModel):
     n_ctx: int
-    use_ram_for_kv: bool = True
+    use_ram_for_kv: Optional[bool] = None
+    kv_mode: Optional[str] = None
 
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "service": "Agente AI"}
 
+@app.get("/api/settings/context-presets")
+def get_context_presets():
+    return engine.context_presets()
+
 @app.post("/api/settings/context")
 def set_context_settings(req: ContextSettingsRequest):
-    return engine.set_context_config(req.n_ctx, req.use_ram_for_kv)
-
-def detect_active_gpu():
-    try:
-        res = subprocess.check_output(
-            ['powershell', '-NoProfile', '-Command', 
-             'Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name'], 
-            text=True, timeout=3
-        )
-        names = [n.strip() for n in res.strip().splitlines() if n.strip() and 'Virtual' not in n]
-        for name in names:
-            if 'Radeon' in name or 'AMD' in name:
-                return {"name": name, "backend": "ROCm / HIP / Vulkan", "vram": "16 GB"}
-            if 'NVIDIA' in name or 'GeForce' in name or 'RTX' in name:
-                return {"name": name, "backend": "CUDA (NVIDIA)", "vram": "8 GB"}
-        if names:
-            return {"name": names[0], "backend": "Vulkan / DirectML", "vram": "Automático"}
-    except Exception:
-        pass
-    return {"name": "GPU Acelerada", "backend": "ROCm / CUDA", "vram": "VRAM"}
+    mode = req.kv_mode
+    if not mode:
+        if req.use_ram_for_kv is not None:
+            mode = "ram" if req.use_ram_for_kv else "gpu"
+        else:
+            mode = "auto"
+    return engine.set_context_config(req.n_ctx, mode)
 
 @app.get("/api/system/status")
 def get_system_status():
@@ -101,24 +112,23 @@ def get_system_status():
     ram_percent = mem.percent
     
     cpu_percent = psutil.cpu_percent(interval=None)
-    gpu_info = detect_active_gpu()
+    eng_status = engine.get_status()
     
-    ram_ctx_gb = round((engine.n_ctx / 32768) * 6.0, 1)
+    ctx_mem = eng_status.get("context_mem_gb")
+    if ctx_mem is None:
+        ctx_mem = round((engine.n_ctx / 32768) * 6.0, 1)
+
+    gpu_vram_str = f"{eng_status.get('gpu_vram_gb', 0)} GB" if eng_status.get("gpu_vram_gb") else "VRAM"
 
     return {
         "cpu_usage": cpu_percent,
         "ram_total_gb": total_ram_gb,
         "ram_available_gb": avail_ram_gb,
         "ram_percent": ram_percent,
-        "active_model": engine.active_model_name,
-        "backend_type": engine.backend_type,
-        "gpu_name": gpu_info["name"],
-        "gpu_backend": gpu_info["backend"],
-        "gpu_vram": gpu_info["vram"],
-        "n_ctx": engine.n_ctx,
-        "n_ctx_k": engine.n_ctx // 1024,
-        "use_ram_for_kv": engine.use_ram_for_kv,
-        "context_ram_gb": ram_ctx_gb
+        **eng_status,
+        "gpu_vram": gpu_vram_str,
+        "use_ram_for_kv": eng_status.get("kv_location") == "ram",
+        "context_ram_gb": ctx_mem,
     }
 
 # --- GIT & OTA UPDATE ENDPOINTS ---
@@ -177,32 +187,31 @@ def list_projects():
 @app.post("/api/projects")
 def create_project(req: NewProjectRequest):
     safe_name = req.name.strip().replace("/", "_").replace("\\", "_")
-    if not safe_name:
-        raise HTTPException(status_code=400, detail="Nombre inválido.")
-    target = os.path.join(PROJECTS_DIR, safe_name)
+    target = _safe_project_path(safe_name)
     os.makedirs(target, exist_ok=True)
-    return {"name": safe_name, "path": target, "status": "created"}
+    return {"name": os.path.basename(target), "path": target, "status": "created"}
 
 @app.delete("/api/projects/{name}")
 def delete_project(name: str):
-    target = os.path.join(PROJECTS_DIR, name)
+    target = _safe_project_path(name)
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     shutil.rmtree(target)
-    return {"status": "deleted", "name": name}
+    return {"status": "deleted", "name": os.path.basename(target)}
 
 @app.get("/api/projects/{name}/files")
 def get_project_files(name: str):
-    target = os.path.join(PROJECTS_DIR, name)
+    target = _safe_project_path(name)
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return SystemTools.list_files(target)
 
 @app.post("/api/projects/{name}/upload")
 async def upload_project_file(name: str, file: UploadFile = File(...)):
-    target_dir = os.path.join(PROJECTS_DIR, name)
+    target_dir = _safe_project_path(name)
     os.makedirs(target_dir, exist_ok=True)
-    file_path = os.path.join(target_dir, file.filename)
+    safe_file_name = os.path.basename(file.filename)
+    file_path = os.path.join(target_dir, safe_file_name)
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -211,14 +220,14 @@ async def upload_project_file(name: str, file: UploadFile = File(...)):
     parsed = SystemTools.read_file_content(file_path)
     return {
         "status": "success",
-        "file_name": file.filename,
+        "file_name": safe_file_name,
         "path": file_path,
         "parsed_preview": parsed
     }
 
 @app.post("/api/projects/{name}/open-folder")
 def open_project_folder(name: str):
-    target = os.path.join(PROJECTS_DIR, name)
+    target = _safe_project_path(name)
     return SystemTools.open_in_windows(target)
 
 @app.post("/api/system/open-file")
@@ -235,7 +244,8 @@ def load_model(req: LoadModelRequest):
 
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
-    project_path = os.path.join(PROJECTS_DIR, req.project_name)
+    project_path = _safe_project_path(req.project_name)
+    os.makedirs(project_path, exist_ok=True)
     messages_dicts = [{"role": m.role, "content": m.content} for m in req.messages]
     
     def event_stream():
