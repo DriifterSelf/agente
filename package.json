@@ -18,13 +18,14 @@
     "directories": {
       "output": "release"
     },
-    "publish": [
+"publish": [
       {
         "provider": "github",
-        "owner": "USUARIO_GITHUB",
-        "repo": "agente-studio"
+        "owner": "DriifterSelf",
+        "repo": "agente"
       }
     ],
+
     "files": [
       "dist/**/*",
       "electron/**/*",
