@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Folder, FileText, ExternalLink, Plus, Trash2, AlertCircle } from 'lucide-react';
+import { Folder, FileText, ExternalLink, Plus, Trash2, AlertCircle, Check, X } from 'lucide-react';
 
 export default function Sidebar({
   projects,
@@ -8,24 +8,24 @@ export default function Sidebar({
   onCreateProject,
   onDeleteProject,
   onOpenProjectFolder,
+  onOpenFile,
   projectFiles
 }) {
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   const handleCreateSubmit = (e) => {
     e.preventDefault();
     const trimmed = newProjectName.trim();
     if (!trimmed) return;
 
-    // Edge case: check invalid Windows characters
-    if (/[\\/:*?"<>|]/.test(trimmed)) {
-      setErrorMsg('No uses caracteres: \\ / : * ? " < > |');
+    if (/[\\/:*?"<>|]/.test(trimmed) || /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(trimmed)) {
+      setErrorMsg('Nombre no permitido por Windows.');
       return;
     }
 
-    // Edge case: check duplicate names
     if (projects.some(p => p.name.toLowerCase() === trimmed.toLowerCase())) {
       setErrorMsg('Ya existe un proyecto con ese nombre.');
       return;
@@ -45,15 +45,8 @@ export default function Sidebar({
     }
   };
 
-  const handleDelete = (e, projName) => {
-    e.stopPropagation();
-    if (window.confirm(`¿Estás seguro de que deseas eliminar el proyecto "${projName}" y todos sus archivos? Esta acción no se puede deshacer.`)) {
-      if (onDeleteProject) onDeleteProject(projName);
-    }
-  };
-
   return (
-    <aside className="w-64 bg-[#0D121F] border-r border-border flex flex-col h-full select-none">
+    <aside className="w-64 bg-[#0D121F] border-r border-border flex flex-col h-full select-none flex-shrink-0">
       {/* Header */}
       <div className="p-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center space-x-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
@@ -78,6 +71,7 @@ export default function Sidebar({
           <input
             type="text"
             autoFocus
+            maxLength={80}
             placeholder="Nombre del proyecto..."
             value={newProjectName}
             onKeyDown={handleKeyDown}
@@ -127,10 +121,11 @@ export default function Sidebar({
         ) : (
           projects.map((proj) => {
             const isActive = proj.name === activeProject;
+            const isConfirming = confirmDelete === proj.name;
             return (
               <div
                 key={proj.name}
-                onClick={() => onSelectProject(proj.name)}
+                onClick={() => !isConfirming && onSelectProject(proj.name)}
                 className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left text-xs transition cursor-pointer group ${
                   isActive
                     ? 'bg-blue-600/15 text-blue-400 border border-blue-500/30 font-medium'
@@ -143,19 +138,45 @@ export default function Sidebar({
                   <span className="truncate">{proj.name}</span>
                 </div>
                 <div className="flex items-center space-x-1 flex-shrink-0">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                    isActive ? 'bg-blue-500/20 text-blue-300' : 'bg-surface text-slate-500'
-                  }`}>
-                    {proj.file_count}
-                  </span>
-                  {/* Delete project button */}
-                  <button
-                    onClick={(e) => handleDelete(e, proj.name)}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-rose-400 text-slate-500 rounded transition"
-                    title={`Eliminar ${proj.name}`}
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                  {isConfirming ? (
+                    <div className="flex items-center space-x-1" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          onDeleteProject(proj.name);
+                          setConfirmDelete(null);
+                        }}
+                        className="p-1 bg-rose-600 text-white rounded hover:bg-rose-500"
+                        title="Confirmar eliminación"
+                      >
+                        <Check size={11} />
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(null)}
+                        className="p-1 bg-surfaceHover text-slate-300 rounded hover:text-white"
+                        title="Cancelar"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                        isActive ? 'bg-blue-500/20 text-blue-300' : 'bg-surface text-slate-500'
+                      }`}>
+                        {proj.file_count}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDelete(proj.name);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-rose-400 text-slate-500 rounded transition"
+                        title={`Eliminar ${proj.name}`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             );
@@ -170,7 +191,7 @@ export default function Sidebar({
             <span className="font-semibold uppercase tracking-wider text-[11px]">Carpeta de Trabajo</span>
             <button
               onClick={() => onOpenProjectFolder(activeProject)}
-              className="flex items-center space-x-1 text-blue-400 hover:text-blue-300 transition text-[11px]"
+              className="flex items-center space-x-1 text-blue-400 hover:text-blue-300 transition text-[11px] px-1.5 py-0.5 rounded hover:bg-surfaceHover"
               title="Abrir en el Explorador de Windows"
             >
               <span>Abrir</span>
@@ -181,14 +202,15 @@ export default function Sidebar({
           <div className="max-h-36 overflow-y-auto space-y-1 text-xs">
             {projectFiles && projectFiles.length > 0 ? (
               projectFiles.map((file) => (
-                <div
+                <button
                   key={file.name}
-                  className="flex items-center space-x-2 text-slate-400 hover:text-slate-200 py-0.5 truncate"
-                  title={file.name}
+                  onClick={() => onOpenFile && onOpenFile(file.path)}
+                  className="w-full flex items-center space-x-2 text-slate-400 hover:text-blue-400 hover:bg-surface/60 px-1.5 py-1 rounded truncate text-left transition"
+                  title={`Abrir ${file.name}`}
                 >
                   <FileText size={12} className="text-slate-500 flex-shrink-0" />
                   <span className="truncate text-[11px]">{file.name}</span>
-                </div>
+                </button>
               ))
             ) : (
               <p className="text-[11px] text-slate-500 italic">Sin archivos todavía</p>

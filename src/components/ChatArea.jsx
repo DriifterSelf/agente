@@ -462,11 +462,13 @@ export default function ChatArea({
               onKeyDown={handleKeyDown}
               placeholder={
                 activeProject
-                  ? `Pide cualquier tarea o arrastra archivos en ${activeProject}...`
+                  ? `Escribe una instrucción o arrastra archivos aquí...`
                   : 'Selecciona o crea un proyecto para comenzar...'
               }
               disabled={!activeProject || isStreaming}
-              className="w-full bg-surface border border-border rounded-xl pl-12 pr-16 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition leading-normal max-h-40 overflow-y-auto"
+              className={`w-full bg-surface border border-border rounded-xl pl-12 pr-14 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none transition leading-5 max-h-40 ${
+                input.length > 80 ? 'overflow-y-auto' : 'overflow-hidden'
+              }`}
             />
 
             <div className="absolute right-2 bottom-2.5 flex items-center space-x-1">

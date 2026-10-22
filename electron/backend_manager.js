@@ -5,7 +5,11 @@ const fs = require('fs');
 
 class BackendManager {
   constructor(appPath) {
-    this.appPath = path.resolve(appPath);
+    // Si corre desde el .exe empaquetado (app.asar), usar process.resourcesPath automáticamente
+    const baseDir = (process.resourcesPath && appPath.includes('app.asar'))
+      ? process.resourcesPath
+      : appPath;
+    this.appPath = path.resolve(baseDir);
     this.process = null;
     this.port = 8765;
   }
@@ -13,9 +17,11 @@ class BackendManager {
   start() {
     return new Promise((resolve, reject) => {
       const isWin = process.platform === 'win32';
-      const pythonExe = isWin
+      const embeddedPy = path.join(this.appPath, 'runtime', 'python', 'python.exe');
+      const venvPy = isWin
         ? path.join(this.appPath, 'venv', 'Scripts', 'python.exe')
         : path.join(this.appPath, 'venv', 'bin', 'python');
+      const pythonExe = fs.existsSync(embeddedPy) ? embeddedPy : venvPy;
 
       const serverScript = path.join(this.appPath, 'backend', 'server.py');
 

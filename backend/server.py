@@ -1,16 +1,17 @@
 import os
 import sys
-
-# Ensure root directory is in sys.path regardless of how server.py is launched
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-
+import re
 import json
 import subprocess
 import psutil
 import shutil
 from typing import List, Dict, Any, Optional
+
+# 1. PRIMERO asegurar que ROOT_DIR esté en sys.path ANTES de importar backend.*
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from fastapi import FastAPI, HTTPException, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -20,9 +21,20 @@ from backend.engine import InferenceEngine
 from backend.agent import AutonomousAgent
 from backend.tools.system_tools import SystemTools
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROJECTS_DIR = os.path.join(BASE_DIR, "projects")
-MODELS_DIR = os.path.join(BASE_DIR, "models")
+WINDOWS_RESERVED = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+BASE_DIR = ROOT_DIR
+USER_DATA_DIR = os.path.join(os.path.expanduser("~"), "AgenteStudio")
+
+# Si el .bat del cliente creó C:\Users\<Cliente>\AgenteStudio, usar esa carpeta
+# para que las actualizaciones OTA nunca borren sus modelos ni sus proyectos
+ACTIVE_DATA_DIR = USER_DATA_DIR if os.path.exists(USER_DATA_DIR) else BASE_DIR
+PROJECTS_DIR = os.path.join(ACTIVE_DATA_DIR, "projects")
+MODELS_DIR = os.path.join(ACTIVE_DATA_DIR, "models")
 os.makedirs(PROJECTS_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 
@@ -55,10 +67,15 @@ def _safe_project_path(name: str) -> str:
     if not name or not isinstance(name, str):
         raise HTTPException(status_code=400, detail="Nombre de proyecto inválido.")
     clean = os.path.basename(name.strip())
-    if not clean or clean in (".", ".."):
-        raise HTTPException(status_code=400, detail="Nombre de proyecto inválido.")
-    target = os.path.abspath(os.path.join(PROJECTS_DIR, clean))
-    if not target.startswith(os.path.abspath(PROJECTS_DIR)):
+    # Reemplazar caracteres ilegales en Windows NTFS y caracteres de control
+    clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", clean).strip(" .")
+    if not clean or clean in (".", "..") or len(clean) > 80:
+        raise HTTPException(status_code=400, detail="Nombre de proyecto inválido o demasiado largo (máx. 80 caracteres).")
+    if clean.split(".")[0].upper() in WINDOWS_RESERVED:
+        raise HTTPException(status_code=400, detail="Nombre reservado de Windows no permitido.")
+    base_abs = os.path.abspath(PROJECTS_DIR)
+    target = os.path.abspath(os.path.join(base_abs, clean))
+    if not target.startswith(base_abs + os.sep):
         raise HTTPException(status_code=400, detail="Ruta de proyecto no permitida.")
     return target
 
@@ -186,8 +203,9 @@ def list_projects():
 
 @app.post("/api/projects")
 def create_project(req: NewProjectRequest):
-    safe_name = req.name.strip().replace("/", "_").replace("\\", "_")
-    target = _safe_project_path(safe_name)
+    if ".." in req.name or "/" in req.name or "\\" in req.name:
+        raise HTTPException(status_code=400, detail="Caracteres de ruta no permitidos en el nombre.")
+    target = _safe_project_path(req.name)
     os.makedirs(target, exist_ok=True)
     return {"name": os.path.basename(target), "path": target, "status": "created"}
 

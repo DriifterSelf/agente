@@ -209,7 +209,47 @@ export default function App() {
 
   const handleSendMessage = async (userText) => {
     if (!activeProject || isStreaming) return;
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
 
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.replace('data: ', '').trim();
+            if (dataStr === '[DONE]') break;
+
+            try {
+              const event = JSON.parse(dataStr);
+
+              if (event.type === 'token') {
+                accumulatedContent += event.content;
+                setCurrentStreamContent(accumulatedContent);
+              } else if (event.type === 'action_start') {
+                setActiveActions(prev => [...prev, { tool: event.tool, params: event.params }]);
+              } else if (event.type === 'action_end') {
+                setActiveActions(prev => prev.filter(a => a.tool !== event.tool));
+                completedActions.push({ tool: event.tool, params: event.params, result: event.result });
+              } else if (event.type === 'artifact_created') {
+                fetchProjectFiles(activeProject);
+              }
+            } catch (err) {
+              console.error('Failed to parse SSE event:', err);
+            }
+          }
+        }
+      }
     const userMsg = { role: 'user', content: userText };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
@@ -323,6 +363,7 @@ export default function App() {
           onCreateProject={handleCreateProject}
           onDeleteProject={handleDeleteProject}
           onOpenProjectFolder={handleOpenProjectFolder}
+          onOpenFile={handleOpenFile}
           projectFiles={projectFiles}
         />
 

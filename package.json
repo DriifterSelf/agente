@@ -28,23 +28,29 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "backend/**/*",
       "package.json"
     ],
     "extraResources": [
       {
-        "from": "projects",
-        "to": "projects"
+        "from": "backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
       },
       {
-        "from": "models",
-        "to": "models"
+        "from": "runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*",
+          "!*.log"
+        ]
       }
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ]
     },
     "nsis": {

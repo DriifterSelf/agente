@@ -173,8 +173,8 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
       </div>
 
       {/* Hardware & OTA Updates */}
-      <div className="hidden md:flex items-center space-x-2 text-xs text-slate-400 no-drag">
-        {/* Active Model Status Badge */}
+      <div className="hidden md:flex items-center space-x-2 text-xs text-slate-400 no-drag whitespace-nowrap flex-shrink-0">
+{/* Active Model Status Badge */}
         {systemStatus?.active_model ? (
           <div
             className="flex items-center space-x-1.5 bg-emerald-500/10 text-emerald-300 px-2.5 py-0.5 rounded border border-emerald-500/30"
@@ -190,7 +190,25 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
             <RefreshCw size={11} className="animate-spin text-amber-400" />
             <span>Cargando modelo...</span>
           </div>
-        ) : null}
+        ) : (
+          <button
+            onClick={async () => {
+              if (systemStatus?.selected_model) {
+                await fetch('http://127.0.0.1:8765/api/models/load', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filename: systemStatus.selected_model })
+                });
+                if (onRefreshStatus) onRefreshStatus();
+              }
+            }}
+            className="flex items-center space-x-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 px-2.5 py-0.5 rounded border border-rose-500/30 transition"
+            title={systemStatus?.engine_message || 'Haz clic para iniciar el modelo'}
+          >
+            <RefreshCw size={11} className="text-rose-400" />
+            <span>{systemStatus?.engine_state === 'no_model' ? 'Sin modelo .gguf' : 'Iniciar Modelo'}</span>
+          </button>
+        )}
 
         {/* Hardware Status */}
         <div className="flex items-center space-x-1.5 bg-surface/80 px-2.5 py-0.5 rounded border border-border/80">

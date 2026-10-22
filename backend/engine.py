@@ -11,10 +11,27 @@ from typing import Generator, Dict, Any, List, Optional
 import requests
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUNTIME_DIR = os.path.join(ROOT_DIR, "runtime", "llama")
+USER_DATA_DIR = os.path.join(os.path.expanduser("~"), "AgenteStudio")
+CUDA_DIR = os.path.join(ROOT_DIR, "runtime", "llama-cuda")
+VULKAN_DIR = os.path.join(ROOT_DIR, "runtime", "llama")
+
+# 1. Priorizar CUDA en la carpeta persistente del cliente (sobrevive a OTAs)
+CLIENT_CUDA_DIR = os.path.join(USER_DATA_DIR, "runtime", "llama-cuda")
+LOCAL_CUDA_DIR = os.path.join(ROOT_DIR, "runtime", "llama-cuda")
+VULKAN_DIR = os.path.join(ROOT_DIR, "runtime", "llama")
+
+if os.path.exists(os.path.join(CLIENT_CUDA_DIR, "llama-server.exe")):
+    RUNTIME_DIR = CLIENT_CUDA_DIR
+elif os.path.exists(os.path.join(LOCAL_CUDA_DIR, "llama-server.exe")):
+    RUNTIME_DIR = LOCAL_CUDA_DIR
+else:
+    RUNTIME_DIR = VULKAN_DIR
+
 SERVER_EXE = os.path.join(RUNTIME_DIR, "llama-server.exe")
-SERVER_LOG = os.path.join(ROOT_DIR, "runtime", "llama-server.log")
-SETTINGS_FILE = os.path.join(ROOT_DIR, "settings.json")
+ACTIVE_DATA_DIR = USER_DATA_DIR if os.path.exists(USER_DATA_DIR) else ROOT_DIR
+SERVER_LOG = os.path.join(ACTIVE_DATA_DIR, "llama-server.log")
+SETTINGS_FILE = os.path.join(ACTIVE_DATA_DIR, "settings.json")
+
 
 LLAMA_HOST = "127.0.0.1"
 LLAMA_PORT = 8766
@@ -82,7 +99,7 @@ def _read_gguf_metadata(path: str) -> Dict[str, Any]:
 
 class InferenceEngine:
     """
-    Manages the embedded llama.cpp server (Vulkan build: works on AMD and NVIDIA GPUs)
+    Manages the embedded llama.cpp server (Vulkan build: works on AMD and NVIDIA GPUs)1
     and streams chat completions from it.
 
     KV cache placement (kv_mode):
@@ -92,8 +109,8 @@ class InferenceEngine:
               so generation is noticeably slower.
     """
 
-    def __init__(self, models_dir: str = "models"):
-        self.models_dir = models_dir
+    def __init__(self, models_dir: Optional[str] = None):
+        self.models_dir = models_dir or os.path.join(ACTIVE_DATA_DIR, "models")
         os.makedirs(models_dir, exist_ok=True)
 
         self.process: Optional[subprocess.Popen] = None
@@ -217,29 +234,36 @@ class InferenceEngine:
         return round(per_token * n_ctx / (1024 ** 3), 2)
 
     def plan_placement(self, filename: str, n_ctx: int) -> Dict[str, Any]:
-        """Decides where weights and KV cache live, based on real VRAM."""
-        info = self.model_info(filename)
-        gpu = self.detect_gpu()
-        vram = gpu["vram_total_gb"]
-        kv_gb = self.estimate_kv_gb(filename, n_ctx, "q8_0")
-        weights_fit = vram > 0 and info["size_gb"] + COMPUTE_OVERHEAD_GB <= vram * 0.95
-        all_fit = vram > 0 and info["size_gb"] + kv_gb + COMPUTE_OVERHEAD_GB <= vram * 0.95
+            """Decides where weights and KV cache live, including hybrid MoE offload (VRAM + DDR5)."""
+            info = self.model_info(filename)
+            gpu = self.detect_gpu()
+            vram = gpu["vram_total_gb"]
+            kv_gb = self.estimate_kv_gb(filename, n_ctx, "q8_0")
 
-        if self.kv_mode == "ram":
-            kv_location = "ram"
-        elif self.kv_mode == "gpu":
-            kv_location = "gpu"
-        else:
-            kv_location = "gpu" if all_fit else "ram"
+            is_moe = "moe" in info.get("arch", "").lower() or "a3b" in filename.lower()
+            weights_fit = vram > 0 and info["size_gb"] + COMPUTE_OVERHEAD_GB <= vram * 0.95
+            all_fit = vram > 0 and info["size_gb"] + kv_gb + COMPUTE_OVERHEAD_GB <= vram * 0.95
 
-        return {
-            "kv_location": kv_location,
-            "kv_gb": kv_gb,
-            "weights_on_gpu": weights_fit,
-            "model_gb": info["size_gb"],
-            "vram_gb": vram,
-            "fits_fully_in_vram": all_fit,
-        }
+            # En modelos MoE grandes (ej. 30B-A3B de 17GB en GPU de 8GB), la Atención (~2.3GB) + KV Cache
+            # caben en VRAM mientras los expertos viven en los 64GB DDR5
+            moe_hybrid = is_moe and not weights_fit and vram >= 6.0
+
+            if self.kv_mode == "ram":
+                kv_location = "ram"
+            elif self.kv_mode == "gpu" or moe_hybrid:
+                kv_location = "gpu"
+            else:
+                kv_location = "gpu" if all_fit else "ram"
+
+            return {
+                "kv_location": kv_location,
+                "kv_gb": kv_gb,
+                "weights_on_gpu": weights_fit or moe_hybrid,
+                "moe_cpu_experts": moe_hybrid,
+                "model_gb": info["size_gb"],
+                "vram_gb": vram,
+                "fits_fully_in_vram": all_fit,
+            }
 
     def context_presets(self) -> List[Dict[str, Any]]:
         """Context sizes valid for the current model, with real memory estimates."""
@@ -330,26 +354,32 @@ class InferenceEngine:
         ).start()
         return {"status": "loading", "message": self.state_message, "n_ctx": self.n_ctx}
 
-    def _build_args(self, model_path: str, n_gpu_layers: Optional[int], kv_location: str, kv_type: str, weights_on_gpu: bool) -> List[str]:
-        args = [
-            SERVER_EXE,
-            "-m", model_path,
-            "--host", LLAMA_HOST,
-            "--port", str(LLAMA_PORT),
-            "-c", str(self.n_ctx),
-            "-np", "1",  # single slot: the whole context belongs to one conversation
-            "--jinja",
-            "-fa", "on" if kv_type != "f16" else "auto",
-            "-ctk", kv_type,
-            "-ctv", kv_type,
-        ]
-        if n_gpu_layers is not None:
-            args += ["-ngl", str(n_gpu_layers)]
-        elif weights_on_gpu:
-            args += ["-ngl", "999"]
-        if kv_location == "ram":
-            args.append("--no-kv-offload")
-        return args
+    def _build_args(self, model_path: str, n_gpu_layers: Optional[int], kv_location: str, kv_type: str, weights_on_gpu: bool, moe_cpu_experts: bool = False) -> List[str]:
+            gpu = self.detect_gpu()
+            args = [
+                SERVER_EXE,
+                "-m", model_path,
+                "--host", LLAMA_HOST,
+                "--port", str(LLAMA_PORT),
+                "-c", str(self.n_ctx),
+                "-np", "1",
+                "--jinja",
+                "-sm", "none",
+                "-mg", str(gpu.get("index", 0)),
+                "-fa", "on" if kv_type != "f16" else "auto",
+                "-ctk", kv_type,
+                "-ctv", kv_type,
+            ]
+            if n_gpu_layers is not None:
+                args += ["-ngl", str(n_gpu_layers)]
+            elif weights_on_gpu:
+                args += ["-ngl", "999"]
+            if moe_cpu_experts:
+                # Mantiene Atención + KV Cache en la RTX 4070 (VRAM) y los 128 expertos en los 64GB DDR5
+                args += ["-ot", ".ffn_.*_exps.=CPU"]
+            if kv_location == "ram":
+                args.append("--no-kv-offload")
+            return args
 
     def _load_worker(self, model_path: str, n_gpu_layers: Optional[int], generation: int):
         self.stop()
@@ -366,7 +396,10 @@ class InferenceEngine:
         for kv_type, kv_location in attempts:
             if generation != self.load_generation:
                 return
-            args = self._build_args(model_path, n_gpu_layers, kv_location, kv_type, plan["weights_on_gpu"])
+            args = self._build_args(
+                model_path, n_gpu_layers, kv_location, kv_type,
+                plan["weights_on_gpu"], plan.get("moe_cpu_experts", False)
+            )
             os.makedirs(os.path.dirname(SERVER_LOG), exist_ok=True)
             log = open(SERVER_LOG, "w", encoding="utf-8", errors="replace")
             log.write("CMD: " + " ".join(args) + "\n\n")

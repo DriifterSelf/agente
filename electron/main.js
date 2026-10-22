@@ -132,6 +132,7 @@ function createWindow() {
     mainWindow.show();
     // Check for updates on startup
     if (app.isPackaged) {
+          mainWindow.webContents.openDevTools({ mode: 'detach' });
       setTimeout(() => {
         autoUpdater.checkForUpdatesAndNotify();
       }, 3000);
@@ -144,6 +145,10 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  
+  const basePath = app.isPackaged ? process.resourcesPath : app.getAppPath();
+  backendManager = new BackendManager(basePath);
+
   setupAutoUpdater();
 
   backendManager = new BackendManager(app.getAppPath());
