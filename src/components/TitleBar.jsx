@@ -26,9 +26,7 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
             setServerPresets(data);
           }
         }
-      } catch (e) {
-        // fallback presets will be used
-      }
+      } catch (e) {}
     };
     if (isBackendConnected) {
       fetchPresets();
@@ -36,6 +34,15 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
   }, [isBackendConnected, systemStatus?.active_model]);
 
   const activePresets = serverPresets.length > 0 ? serverPresets : FALLBACK_PRESETS;
+
+  const shortGpuName = (name) => {
+    if (!name) return '';
+    return name
+      .replace(/NVIDIA GeForce /i, '')
+      .replace(/AMD Radeon /i, '')
+      .replace(/ Laptop GPU/i, '')
+      .trim();
+  };
 
   const handleSelectMode = async (mode) => {
     try {
@@ -45,9 +52,7 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ n_ctx: currentTokens, kv_mode: mode })
       });
-      if (res.ok && onRefreshStatus) {
-        onRefreshStatus();
-      }
+      if (res.ok && onRefreshStatus) onRefreshStatus();
     } catch (err) {
       console.error('Error changing mode:', err);
     }
@@ -61,9 +66,7 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ n_ctx: tokens, kv_mode: currentMode })
       });
-      if (res.ok && onRefreshStatus) {
-        onRefreshStatus();
-      }
+      if (res.ok && onRefreshStatus) onRefreshStatus();
     } catch (err) {
       console.error('Error changing context:', err);
     }
@@ -71,59 +74,31 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
   };
 
   useEffect(() => {
-    // Listen to Electron window state
     if (window.electronAPI) {
       if (window.electronAPI.onUpdateStatus) {
-        window.electronAPI.onUpdateStatus((data) => {
-          setUpdateStatus(data);
-        });
+        window.electronAPI.onUpdateStatus((data) => setUpdateStatus(data));
       }
       if (window.electronAPI.onMaximizedChange) {
-        window.electronAPI.onMaximizedChange((maximized) => {
-          setIsMaximized(maximized);
-        });
+        window.electronAPI.onMaximizedChange((maximized) => setIsMaximized(maximized));
       }
       if (window.electronAPI.isMaximized) {
-        window.electronAPI.isMaximized().then((maximized) => {
-          setIsMaximized(maximized);
-        });
+        window.electronAPI.isMaximized().then((maximized) => setIsMaximized(maximized));
       }
     }
   }, []);
 
-  const handleMinimize = () => {
-    if (window.electronAPI) window.electronAPI.minimize();
-  };
-
-  const handleMaximize = () => {
-    if (window.electronAPI) window.electronAPI.maximize();
-  };
-
-  const handleClose = () => {
-    if (window.electronAPI) window.electronAPI.close();
-  };
-
   const handleCheckUpdates = async () => {
     setIsSyncing(true);
     setSyncMessage('Buscando...');
-    
-    // 1. Try Electron autoUpdater
     if (window.electronAPI && window.electronAPI.checkForUpdates) {
       window.electronAPI.checkForUpdates();
     }
-
-    // 2. Also check Git sync
     try {
       const res = await fetch('http://127.0.0.1:8765/api/system/git-pull', { method: 'POST' });
       const data = await res.json();
-      if (data.status === 'success') {
-        if (data.rebuilt) {
-          setSyncMessage('¡Actualizado!');
-          setTimeout(() => window.location.reload(), 1500);
-        } else {
-          setSyncMessage('Al día');
-          setTimeout(() => setSyncMessage(''), 3000);
-        }
+      if (data.status === 'success' && data.rebuilt) {
+        setSyncMessage('¡Actualizado!');
+        setTimeout(() => window.location.reload(), 1500);
       } else {
         setSyncMessage('Al día');
         setTimeout(() => setSyncMessage(''), 3000);
@@ -136,87 +111,59 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
     }
   };
 
-  const handleRestartForUpdate = () => {
-    if (window.electronAPI && window.electronAPI.restartForUpdate) {
-      window.electronAPI.restartForUpdate();
-    }
-  };
-
   return (
-    <div className="h-10 bg-[#070A0F] border-b border-border flex items-center justify-between select-none drag-region px-3 z-50">
-      {/* Brand & Project with safe truncation */}
-      <div className="flex items-center space-x-3 overflow-hidden">
-        <div className="flex items-center space-x-2 text-blue-400 font-semibold text-sm flex-shrink-0">
+    <div className="h-10 bg-[#070A0F] border-b border-border flex items-center justify-between select-none drag-region px-2.5 z-50 gap-2">
+      {/* Brand & Project */}
+      <div className="flex items-center space-x-2 min-w-0 flex-shrink">
+        <div className="flex items-center space-x-1.5 text-blue-400 font-semibold text-xs sm:text-sm flex-shrink-0">
           <div className="w-5 h-5 rounded bg-blue-600/20 flex items-center justify-center border border-blue-500/30">
             <Sparkles size={12} className="text-blue-400" />
           </div>
-          <span className="tracking-wide text-slate-100">Agente Studio</span>
+          <span className="tracking-wide text-slate-100 whitespace-nowrap">Agente Studio</span>
         </div>
 
-        <div className="h-4 w-[1px] bg-border flex-shrink-0" />
+        <div className="h-4 w-[1px] bg-border flex-shrink-0 hidden sm:block" />
 
         <div
-          className="flex items-center space-x-1.5 text-xs text-textMuted bg-surface px-2.5 py-0.5 rounded-full border border-border truncate max-w-[240px]"
+          className="hidden sm:flex items-center space-x-1.5 text-[11px] text-textMuted bg-surface px-2 py-0.5 rounded-full border border-border truncate max-w-[160px] lg:max-w-[220px]"
           title={`Proyecto activo: ${activeProject || 'Sin selección'}`}
         >
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
             isBackendConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-ping'
           }`} />
-          <span className="truncate">
-            {activeProject ? (
-              <span>Proyecto: <strong className="text-slate-200">{activeProject}</strong></span>
-            ) : (
-              <span className="text-slate-400">Sin proyecto</span>
-            )}
+          <span className="truncate text-slate-200 font-medium">
+            {activeProject || 'Sin proyecto'}
           </span>
         </div>
       </div>
 
       {/* Hardware & OTA Updates */}
-      <div className="hidden md:flex items-center space-x-2 text-xs text-slate-400 no-drag whitespace-nowrap flex-shrink-0">
-{/* Active Model Status Badge */}
+      <div className="flex items-center space-x-1.5 text-[11px] text-slate-400 no-drag whitespace-nowrap flex-shrink-0">
+        {/* Active Model Status Badge */}
         {systemStatus?.active_model ? (
           <div
-            className="flex items-center space-x-1.5 bg-emerald-500/10 text-emerald-300 px-2.5 py-0.5 rounded border border-emerald-500/30"
+            className="flex items-center space-x-1 bg-emerald-500/10 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30"
             title={systemStatus.engine_message || 'Motor local listo'}
           >
-            <Sparkles size={11} className="text-emerald-400" />
-            <span className="font-medium">
-              {systemStatus.active_model.replace(/\.gguf$/i, '').replace(/[-_]/g, ' ')} · {systemStatus.kv_location === 'ram' ? 'RAM DDR5' : 'VRAM'}
+            <Sparkles size={11} className="text-emerald-400 flex-shrink-0" />
+            <span className="font-medium truncate max-w-[140px] xl:max-w-none">
+              {systemStatus.active_model.replace(/\.gguf$/i, '').replace(/[-_]/g, ' ')}
             </span>
           </div>
         ) : systemStatus?.engine_state === 'loading' ? (
-          <div className="flex items-center space-x-1.5 bg-amber-500/10 text-amber-300 px-2.5 py-0.5 rounded border border-amber-500/30">
+          <div className="flex items-center space-x-1 bg-amber-500/10 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
             <RefreshCw size={11} className="animate-spin text-amber-400" />
             <span>Cargando modelo...</span>
           </div>
-        ) : (
-          <button
-            onClick={async () => {
-              if (systemStatus?.selected_model) {
-                await fetch('http://127.0.0.1:8765/api/models/load', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ filename: systemStatus.selected_model })
-                });
-                if (onRefreshStatus) onRefreshStatus();
-              }
-            }}
-            className="flex items-center space-x-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 px-2.5 py-0.5 rounded border border-rose-500/30 transition"
-            title={systemStatus?.engine_message || 'Haz clic para iniciar el modelo'}
-          >
-            <RefreshCw size={11} className="text-rose-400" />
-            <span>{systemStatus?.engine_state === 'no_model' ? 'Sin modelo .gguf' : 'Iniciar Modelo'}</span>
-          </button>
-        )}
+        ) : null}
 
         {/* Hardware Status */}
-        <div className="flex items-center space-x-1.5 bg-surface/80 px-2.5 py-0.5 rounded border border-border/80">
-          <Cpu size={12} className="text-blue-400" />
+        <div className="hidden lg:flex items-center space-x-1 bg-surface/80 px-2 py-0.5 rounded border border-border/80">
+          <Cpu size={11} className="text-blue-400 flex-shrink-0" />
           <span>
             {systemStatus?.gpu_name 
-              ? `${systemStatus.gpu_name} • ${systemStatus.gpu_backend}`
-              : isBackendConnected ? 'Cargando hardware...' : 'Conectando con motor local...'}
+              ? `${shortGpuName(systemStatus.gpu_name)} • ${systemStatus.gpu_backend}`
+              : isBackendConnected ? 'Detectando GPU...' : 'Conectando...'}
           </span>
         </div>
 
@@ -224,29 +171,24 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
         <div className="relative">
           <button
             onClick={() => setIsContextOpen(!isContextOpen)}
-            className="flex items-center space-x-1.5 bg-surface/80 hover:bg-surfaceHover text-slate-300 hover:text-white px-2.5 py-0.5 rounded border border-border/80 transition"
-            title="Configurar asignación de memoria RAM para el contexto"
+            className="flex items-center space-x-1 bg-surface/80 hover:bg-surfaceHover text-slate-300 hover:text-white px-2 py-0.5 rounded border border-border/80 transition"
+            title="Configurar memoria para el contexto"
           >
-            <Brain size={12} className="text-purple-400" />
+            <Brain size={11} className="text-purple-400 flex-shrink-0" />
             <span>
-              Contexto: <strong className="text-purple-300">{systemStatus?.n_ctx_k || 32}K</strong>
-              <span className="text-slate-500 ml-1">
-                ({systemStatus?.context_ram_gb || 2.4} GB · {systemStatus?.kv_location === 'ram' ? 'RAM' : 'VRAM'})
+              <strong className="text-purple-300">{systemStatus?.n_ctx_k || 32}K</strong>
+              <span className="hidden xl:inline text-slate-500 ml-1">
+                ({systemStatus?.context_ram_gb || 1.6} GB · {systemStatus?.kv_location === 'ram' ? 'RAM' : 'VRAM'})
               </span>
             </span>
-            <ChevronDown size={11} className={`text-slate-400 transition-transform ${isContextOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown size={10} className={`text-slate-400 transition-transform ${isContextOpen ? 'rotate-180' : ''}`} />
           </button>
 
           {isContextOpen && (
             <>
-              {/* Backdrop */}
-              <div 
-                className="fixed inset-0 z-40" 
-                onClick={() => setIsContextOpen(false)} 
-              />
-              {/* Popover */}
-              <div className="absolute right-0 top-full mt-1.5 w-88 bg-[#0F141C] border border-border rounded-lg shadow-2xl p-3 z-50 text-left">
-                <div className="flex items-center justify-between pb-2 mb-2 border-b border-border/80">
+              <div className="fixed inset-0 z-40" onClick={() => setIsContextOpen(false)} />
+              <div className="absolute right-0 top-full mt-1.5 w-80 sm:w-96 max-w-[92vw] bg-[#0F141C] border border-border rounded-xl shadow-2xl p-3.5 z-50 text-left whitespace-normal">
+                <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-border/80">
                   <div className="flex items-center space-x-1.5 text-slate-200 font-medium text-xs">
                     <Brain size={13} className="text-purple-400" />
                     <span>Ubicación y Memoria del Contexto</span>
@@ -256,7 +198,6 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
                   </span>
                 </div>
 
-                {/* Mode Selector */}
                 <div className="mb-3">
                   <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Modo de Ubicación KV</div>
                   <div className="grid grid-cols-3 gap-1 bg-surface/60 p-1 rounded border border-border/60">
@@ -284,10 +225,9 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
                 </div>
 
                 <p className="text-[11px] text-slate-400 mb-2.5 leading-relaxed">
-                  En <strong>Automático</strong>, el motor evalúa tu GPU en tiempo real. Si el contexto cabe en VRAM lo ejecuta a máxima velocidad; si es colosal, traslada el caché a tus <strong>64 GB DDR5</strong> sin saturar la VRAM.
+                  En <strong>Automático</strong>, el motor evalúa tu GPU en tiempo real y combina tu VRAM con tus <strong>{systemStatus?.ram_total_gb || 64} GB DDR5</strong>.
                 </p>
 
-                {/* Preset List */}
                 <div className="space-y-1.5 mb-2.5">
                   {activePresets.map((preset) => {
                     const isSelected = (systemStatus?.n_ctx || 32768) === preset.tokens;
@@ -326,62 +266,50 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
                 </div>
 
                 <div className="pt-2 border-t border-border/80 flex items-center justify-between text-[10px] text-slate-400">
-                  <span>RAM Total: <strong className="text-slate-200">{systemStatus?.ram_total_gb || 64} GB</strong> (Libre: <strong className="text-emerald-400">{systemStatus?.ram_available_gb || 45} GB</strong>)</span>
-                  <span>VRAM: <strong className="text-blue-300">{systemStatus?.gpu_vram || '16 GB'}</strong></span>
+                  <span>RAM: <strong className="text-slate-200">{systemStatus?.ram_total_gb || 64} GB</strong> (Libre: <strong className="text-emerald-400">{systemStatus?.ram_available_gb || 41} GB</strong>)</span>
+                  <span>VRAM: <strong className="text-blue-300">{systemStatus?.gpu_vram || '8.0 GB'}</strong></span>
                 </div>
               </div>
             </>
           )}
         </div>
 
-        {/* OTA Update Status & Sync Button */}
+        {/* OTA Update Button */}
         {updateStatus?.status === 'downloaded' ? (
           <button
-            onClick={handleRestartForUpdate}
-            className="flex items-center space-x-1.5 bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded font-medium hover:bg-emerald-600/30 transition animate-bounce"
+            onClick={() => window.electronAPI?.restartForUpdate()}
+            className="flex items-center space-x-1 bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded font-medium hover:bg-emerald-600/30 transition animate-bounce"
           >
-            <DownloadCloud size={12} />
-            <span>Reiniciar para aplicar v{updateStatus.version}</span>
+            <DownloadCloud size={11} />
+            <span>Aplicar v{updateStatus.version}</span>
           </button>
         ) : updateStatus?.status === 'downloading' ? (
           <div className="flex items-center space-x-1 bg-blue-600/20 border border-blue-500/30 text-blue-300 px-2 py-0.5 rounded">
-            <RefreshCw size={11} className="animate-spin text-blue-400" />
-            <span>Descargando OTA ({updateStatus.percent}%)</span>
+            <RefreshCw size={10} className="animate-spin text-blue-400" />
+            <span>OTA ({updateStatus.percent}%)</span>
           </div>
         ) : (
           <button
             onClick={handleCheckUpdates}
             disabled={isSyncing}
-            className="flex items-center space-x-1.5 bg-surface/80 hover:bg-surfaceHover text-slate-300 hover:text-white px-2 py-0.5 rounded border border-border/80 transition"
-            title="Buscar actualizaciones y sincronizar con el repositorio"
+            className="flex items-center space-x-1 bg-surface/80 hover:bg-surfaceHover text-slate-300 hover:text-white px-2 py-0.5 rounded border border-border/80 transition"
+            title="Buscar actualizaciones OTA"
           >
-            <RefreshCw size={11} className={isSyncing ? "animate-spin text-blue-400" : "text-slate-400"} />
-            <span>{syncMessage || "Buscar Actualizaciones"}</span>
+            <RefreshCw size={10} className={isSyncing ? "animate-spin text-blue-400" : "text-slate-400"} />
+            <span className="hidden md:inline">{syncMessage || "Actualizar"}</span>
           </button>
         )}
       </div>
 
       {/* Window Controls */}
-      <div className="flex items-center no-drag space-x-1 flex-shrink-0">
-        <button
-          onClick={handleMinimize}
-          className="w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition"
-          title="Minimizar"
-        >
+      <div className="flex items-center no-drag space-x-0.5 flex-shrink-0">
+        <button onClick={() => window.electronAPI?.minimize()} className="w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition">
           <Minus size={14} />
         </button>
-        <button
-          onClick={handleMaximize}
-          className="w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition"
-          title={isMaximized ? "Restaurar" : "Maximizar"}
-        >
+        <button onClick={() => window.electronAPI?.maximize()} className="w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition">
           {isMaximized ? <Copy size={11} className="rotate-180" /> : <Square size={12} />}
         </button>
-        <button
-          onClick={handleClose}
-          className="w-7 h-7 flex items-center justify-center rounded hover:bg-rose-600 text-slate-400 hover:text-white transition"
-          title="Cerrar"
-        >
+        <button onClick={() => window.electronAPI?.close()} className="w-7 h-7 flex items-center justify-center rounded hover:bg-rose-600 text-slate-400 hover:text-white transition">
           <X size={14} />
         </button>
       </div>
