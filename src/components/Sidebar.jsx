@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Folder, FileText, ExternalLink, Plus, Trash2, AlertCircle, Check, X } from 'lucide-react';
-import { FolderGit } from 'lucide-react';
+import { Folder, FileText, ExternalLink, Plus, Trash2, AlertCircle, Check, X, FolderGit } from 'lucide-react';
+import { API_BASE } from '../config';
 
 export default function Sidebar({
   projects,
@@ -39,19 +39,22 @@ export default function Sidebar({
   };
 // Dentro del componente Sidebar:
 const handleOpenLocalRepo = async () => {
+  let selectedPath = null;
   if (window.electronAPI && window.electronAPI.selectFolder) {
-    const selectedPath = await window.electronAPI.selectFolder();
-    if (selectedPath) {
-      // Conectar el repo con el backend
-      const res = await fetch('http://127.0.0.1:8765/api/workspace/open-repo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: selectedPath })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        onSelectProject(data.name);
-      }
+    selectedPath = await window.electronAPI.selectFolder();
+  } else {
+    selectedPath = window.prompt('Introduce el nombre o ruta del repositorio local:', 'Mi Repositorio');
+  }
+  if (selectedPath) {
+    // Conectar el repo con el backend
+    const res = await fetch(`${API_BASE}/api/workspace/open-repo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: selectedPath })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      onSelectProject(data.name);
     }
   }
 };

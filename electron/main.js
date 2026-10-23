@@ -78,13 +78,13 @@ function createWindow() {
     }
   });
   ipcMain.handle('select-folder', async () => {
-  if (!mainWindow) return null;
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Seleccionar Repositorio Local',
-    properties: ['openDirectory']
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Seleccionar Repositorio Local',
+      properties: ['openDirectory']
+    });
+    return result.canceled ? null : result.filePaths[0];
   });
-  return result.canceled ? null : result.filePaths[0];
-});
 
   // Window controls
   ipcMain.on('window-minimize', () => {
@@ -138,10 +138,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-     mainWindow.webContents.openDevTools({ mode: 'detach' }); // <--- Abre la consola flotante sin aplastar la UI
-    // Check for updates on startup
     if (app.isPackaged) {
-          mainWindow.webContents.openDevTools({ mode: 'detach' });
       setTimeout(() => {
         autoUpdater.checkForUpdatesAndNotify();
       }, 3000);
@@ -154,13 +151,11 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  
   const basePath = app.isPackaged ? process.resourcesPath : app.getAppPath();
   backendManager = new BackendManager(basePath);
 
   setupAutoUpdater();
 
-  backendManager = new BackendManager(app.getAppPath());
   try {
     await backendManager.start();
   } catch (err) {

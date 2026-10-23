@@ -4,7 +4,7 @@ import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import ArtifactsPanel from './components/ArtifactsPanel';
 
-const API_BASE = 'http://127.0.0.1:8765';
+import { API_BASE, isElectron } from './config';
 
 export default function App() {
   const [projects, setProjects] = useState([]);
@@ -263,9 +263,11 @@ export default function App() {
                 accumulatedContent += event.content;
                 setCurrentStreamContent(accumulatedContent);
               } else if (event.type === 'action_start') {
-                setActiveActions(prev => [...prev, { tool: event.tool, params: event.params }]);
+                const actId = event.id || `${event.tool}-${Date.now()}`;
+                setActiveActions(prev => [...prev, { id: actId, tool: event.tool, params: event.params }]);
               } else if (event.type === 'action_end') {
-                setActiveActions(prev => prev.filter(a => a.tool !== event.tool));
+                const targetId = event.id;
+                setActiveActions(prev => prev.filter(a => targetId ? a.id !== targetId : a.tool !== event.tool));
                 completedActions.push({ tool: event.tool, params: event.params, result: event.result });
               } else if (event.type === 'artifact_created') {
                 fetchProjectFiles(activeProject);
@@ -274,6 +276,9 @@ export default function App() {
           }
         }
       }
+
+      // Ensure all started actions are marked as completed when stream ends
+      setActiveActions([]);
 
       setMessages(prev => {
         const finalMsgs = [...prev, { role: 'assistant', content: accumulatedContent, actions: completedActions }];

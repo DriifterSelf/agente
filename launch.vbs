@@ -1,5 +1,3 @@
 Set WshShell = CreateObject("WScript.Shell")
-strPath = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
-WshShell.CurrentDirectory = strPath
-WshShell.Run "cmd /c npx electron .", 0, False
+WshShell.Run "cmd /c npm start", 0
 Set WshShell = Nothing

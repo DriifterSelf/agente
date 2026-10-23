@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openPath: (fullPath) => ipcRenderer.invoke('open-path', fullPath),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   platform: process.platform,
+  isElectron: true,
 
   // Window state
   onMaximizedChange: (callback) => ipcRenderer.on('window-maximized-change', (event, isMaximized) => callback(isMaximized)),

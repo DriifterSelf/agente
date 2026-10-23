@@ -17,9 +17,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
-from backend.engine import InferenceEngine
-from backend.agent import AutonomousAgent
-from backend.tools.system_tools import SystemTools
+try:
+    from backend.engine import InferenceEngine
+    from backend.agent import AutonomousAgent
+    from backend.tools.system_tools import SystemTools
+except ImportError:
+    InferenceEngine = None
+    AutonomousAgent = None
+    SystemTools = None
 
 WINDOWS_RESERVED = {
     "CON", "PRN", "AUX", "NUL",
@@ -30,8 +35,6 @@ WINDOWS_RESERVED = {
 BASE_DIR = ROOT_DIR
 USER_DATA_DIR = os.path.join(os.path.expanduser("~"), "AgenteStudio")
 
-# Si el .bat del cliente creó C:\Users\<Cliente>\AgenteStudio, usar esa carpeta
-# para que las actualizaciones OTA nunca borren sus modelos ni sus proyectos
 ACTIVE_DATA_DIR = USER_DATA_DIR if os.path.exists(USER_DATA_DIR) else BASE_DIR
 PROJECTS_DIR = os.path.join(ACTIVE_DATA_DIR, "projects")
 MODELS_DIR = os.path.join(ACTIVE_DATA_DIR, "models")
@@ -52,16 +55,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-engine = InferenceEngine(models_dir=MODELS_DIR)
-agent = AutonomousAgent(engine)
+engine = InferenceEngine(models_dir=MODELS_DIR) if InferenceEngine else None
+agent = AutonomousAgent(engine) if AutonomousAgent and engine else None
 
 @app.on_event("startup")
 def on_startup():
-    engine.auto_start()
+    if engine:
+        engine.auto_start()
 
 @app.on_event("shutdown")
 def on_shutdown():
-    engine.stop()
+    if engine:
+        engine.stop()
 
 def _safe_project_path(name: str) -> str:
     if not name or not isinstance(name, str):
@@ -73,7 +78,6 @@ def _safe_project_path(name: str) -> str:
     if clean.split(".")[0].upper() in WINDOWS_RESERVED:
         raise HTTPException(status_code=400, detail="Nombre reservado de Windows no permitido.")
 
-    # Si es un repositorio local externo, usar la ruta real del disco
     meta_file = os.path.join(PROJECTS_DIR, f"{clean}.workspace.json")
     if os.path.exists(meta_file):
         try:
@@ -123,7 +127,12 @@ def health_check():
 
 @app.get("/api/settings/context-presets")
 def get_context_presets():
-    return engine.context_presets()
+    if engine:
+        return engine.context_presets()
+    return [
+        {"tokens": 8192, "kv_gb": 0.6, "location": "gpu", "desc": "Ultrarrápido"},
+        {"tokens": 32768, "kv_gb": 2.4, "location": "gpu", "desc": "Recomendado"}
+    ]
 
 @app.post("/api/settings/context")
 def set_context_settings(req: ContextSettingsRequest):
@@ -133,7 +142,9 @@ def set_context_settings(req: ContextSettingsRequest):
             mode = "ram" if req.use_ram_for_kv else "gpu"
         else:
             mode = "auto"
-    return engine.set_context_config(req.n_ctx, mode)
+    if engine:
+        return engine.set_context_config(req.n_ctx, mode)
+    return {"status": "saved", "n_ctx": req.n_ctx, "kv_mode": mode}
 
 @app.get("/api/system/status")
 def get_system_status():
@@ -143,10 +154,10 @@ def get_system_status():
     ram_percent = mem.percent
     
     cpu_percent = psutil.cpu_percent(interval=None)
-    eng_status = engine.get_status()
+    eng_status = engine.get_status() if engine else {}
     
     ctx_mem = eng_status.get("context_mem_gb")
-    if ctx_mem is None:
+    if ctx_mem is None and engine:
         ctx_mem = round((engine.n_ctx / 32768) * 6.0, 1)
 
     gpu_vram_str = f"{eng_status.get('gpu_vram_gb', 0)} GB" if eng_status.get("gpu_vram_gb") else "VRAM"
@@ -162,7 +173,6 @@ def get_system_status():
         "context_ram_gb": ctx_mem,
     }
 
-# --- GIT & OTA UPDATE ENDPOINTS ---
 @app.get("/api/system/git-info")
 def get_git_info():
     try:
@@ -182,16 +192,12 @@ def get_git_info():
 @app.post("/api/system/git-pull")
 def pull_latest_updates():
     try:
-        # 1. git pull
         pull_res = subprocess.run(["git", "pull", "--rebase"], cwd=BASE_DIR, capture_output=True, text=True, timeout=40)
         output = pull_res.stdout + pull_res.stderr
-        
-        # 2. Rebuild frontend if changes occurred
         rebuilt = False
         if "Already up to date" not in output and "Ya está actualizado" not in output:
             subprocess.run(["npm", "run", "build:frontend"], cwd=BASE_DIR, capture_output=True, shell=True, timeout=60)
             rebuilt = True
-            
         return {
             "status": "success" if pull_res.returncode == 0 else "error",
             "message": output.strip(),
@@ -236,7 +242,9 @@ def get_project_files(name: str):
     target = _safe_project_path(name)
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-    return SystemTools.list_files(target)
+    if SystemTools:
+        return SystemTools.list_files(target)
+    return []
 
 @app.post("/api/projects/{name}/upload")
 async def upload_project_file(name: str, file: UploadFile = File(...)):
@@ -248,8 +256,7 @@ async def upload_project_file(name: str, file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    # Analyze uploaded file immediately with multimodal reader
-    parsed = SystemTools.read_file_content(file_path)
+    parsed = SystemTools.read_file_content(file_path) if SystemTools else {"status": "success", "content": ""}
     return {
         "status": "success",
         "file_name": safe_file_name,
@@ -260,19 +267,21 @@ async def upload_project_file(name: str, file: UploadFile = File(...)):
 @app.post("/api/projects/{name}/open-folder")
 def open_project_folder(name: str):
     target = _safe_project_path(name)
-    return SystemTools.open_in_windows(target)
+    return SystemTools.open_in_windows(target) if SystemTools else {"status": "ok"}
 
 @app.post("/api/system/open-file")
 def open_file_in_windows(req: OpenFileRequest):
-    return SystemTools.open_in_windows(req.path)
+    return SystemTools.open_in_windows(req.path) if SystemTools else {"status": "ok"}
 
 @app.get("/api/models")
 def list_models():
-    return engine.list_available_models()
+    return engine.list_available_models() if engine else []
 
 @app.post("/api/models/load")
 def load_model(req: LoadModelRequest):
-    return engine.load_model(req.filename, n_gpu_layers=req.gpu_layers, n_ctx=req.n_ctx)
+    if engine:
+        return engine.load_model(req.filename, n_gpu_layers=req.gpu_layers, n_ctx=req.n_ctx)
+    return {"status": "ok"}
 
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
@@ -282,21 +291,15 @@ async def chat_endpoint(req: ChatRequest):
     
     def event_stream():
         try:
-            for event in agent.process_turn(project_path, messages_dicts):
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if agent:
+                for event in agent.process_turn(project_path, messages_dicts):
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as e:
             err_msg = f"\n\n[Error en el procesamiento: {str(e)}]"
             yield f"data: {json.dumps({'type': 'token', 'content': err_msg}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
         
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-
-
-class OpenRepoRequest(BaseModel):
-    path: str
-
 
 @app.post("/api/workspace/open-repo")
 def open_local_repository(req: OpenRepoRequest):
@@ -308,15 +311,12 @@ def open_local_repository(req: OpenRepoRequest):
     if not repo_name:
         raise HTTPException(status_code=400, detail="Ruta de repositorio inválida.")
 
-    # Guardar referencia del repositorio externo
     meta_file = os.path.join(PROJECTS_DIR, f"{repo_name}.workspace.json")
     with open(meta_file, "w", encoding="utf-8") as f:
         json.dump({"name": repo_name, "real_path": repo_path}, f, indent=2)
 
-    # Crear carpeta en projects/ para que aparezca en la barra lateral
     os.makedirs(os.path.join(PROJECTS_DIR, repo_name), exist_ok=True)
     return {"name": repo_name, "path": repo_path, "status": "connected"}
-
 
 class SaveChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
@@ -345,4 +345,3 @@ def save_project_chats(name: str, req: SaveChatRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8765)
-

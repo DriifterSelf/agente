@@ -3,11 +3,52 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Agente Digital de Sistema</title>
+    <title>Agente Studio</title>
+    <meta name="description" content="Agente Autónomo de Oficina y Sistema para gestión de proyectos, análisis documental, generación de entregables y automatización." />
+    <meta property="og:title" content="Agente Studio" />
+    <meta property="og:description" content="Agente Autónomo de Oficina y Sistema para gestión de proyectos, análisis documental, generación de entregables y automatización." />
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      // Web fallback polyfill for Electron APIs
+      if (!window.electronAPI) {
+        window.electronAPI = {
+          _isWebShim: true,
+          isElectron: false,
+          minimize: () => {},
+          maximize: () => {
+            if (!document.fullscreenElement) {
+              document.documentElement.requestFullscreen?.().catch(() => {});
+            } else {
+              document.exitFullscreen?.().catch(() => {});
+            }
+          },
+          close: () => {},
+          isMaximized: async () => !!document.fullscreenElement,
+          onMaximizedChange: (cb) => {
+            document.addEventListener('fullscreenchange', () => cb(!!document.fullscreenElement));
+          },
+          openPath: async (p) => {
+            console.log('[Web App] Opening file:', p);
+            return true;
+          },
+          openExternal: async (url) => {
+            window.open(url, '_blank');
+          },
+          selectFolder: async () => {
+            const name = window.prompt('Introduce el nombre o ruta del repositorio local:', 'Mi Repositorio');
+            return name ? name.trim() : null;
+          },
+          checkForUpdates: () => {},
+          restartForUpdate: () => window.location.reload(),
+          onUpdateStatus: (cb) => {
+            setTimeout(() => cb({ status: 'not-available' }), 1000);
+          }
+        };
+      }
+    </script>
   </head>
   <body class="bg-background text-textMain overflow-hidden select-none font-['Inter',sans-serif]">
     <div id="root"></div>

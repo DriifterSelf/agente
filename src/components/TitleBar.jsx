@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Minus, Square, Copy, X, Cpu, Sparkles, RefreshCw, DownloadCloud, Check, Brain, ChevronDown } from 'lucide-react';
+import { API_BASE } from '../config';
 
 export default function TitleBar({ activeProject, systemStatus, isBackendConnected, onRefreshStatus, usedTokens = 0 }) {
   const [updateStatus, setUpdateStatus] = useState(null);
@@ -19,7 +20,7 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
   useEffect(() => {
     const fetchPresets = async () => {
       try {
-        const res = await fetch('http://127.0.0.1:8765/api/settings/context-presets');
+        const res = await fetch(`${API_BASE}/api/settings/context-presets`);
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data) && data.length > 0) {
@@ -47,7 +48,7 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
   const handleSelectMode = async (mode) => {
     try {
       const currentTokens = systemStatus?.n_ctx || 32768;
-      const res = await fetch('http://127.0.0.1:8765/api/settings/context', {
+      const res = await fetch(`${API_BASE}/api/settings/context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ n_ctx: currentTokens, kv_mode: mode })
@@ -61,7 +62,7 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
   const handleSelectContext = async (tokens) => {
     try {
       const currentMode = systemStatus?.kv_mode || 'auto';
-      const res = await fetch('http://127.0.0.1:8765/api/settings/context', {
+      const res = await fetch(`${API_BASE}/api/settings/context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ n_ctx: tokens, kv_mode: currentMode })
@@ -94,7 +95,7 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
       window.electronAPI.checkForUpdates();
     }
     try {
-      const res = await fetch('http://127.0.0.1:8765/api/system/git-pull', { method: 'POST' });
+      const res = await fetch(`${API_BASE}/api/system/git-pull`, { method: 'POST' });
       const data = await res.json();
       if (data.status === 'success' && data.rebuilt) {
         setSyncMessage('¡Actualizado!');

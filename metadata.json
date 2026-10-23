@@ -1,0 +1,11 @@
+{
+  "name": "Agente Studio",
+  "description": "Agente Autónomo de Oficina y Sistema para gestión de proyectos, análisis documental, generación de entregables y automatización.",
+  "permissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,14 +1,11 @@
 $WshShell = New-Object -ComObject WScript.Shell
-$DesktopPath = [Environment]::GetFolderPath("Desktop")
-$ShortcutPath = Join-Path $DesktopPath "Agente Studio.lnk"
-$TargetVBS = "c:\Users\uwu\Documents\agente\launch.vbs"
-
+$DesktopPath = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
+$ShortcutPath = Join-Path -Path $DesktopPath -ChildPath "Agente Studio.lnk"
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Shortcut.TargetPath = "wscript.exe"
-$Shortcut.Arguments = "`"$TargetVBS`""
-$Shortcut.WorkingDirectory = "c:\Users\uwu\Documents\agente"
-$Shortcut.Description = "Agente Autónomo de Oficina y Sistema para Windows"
-$Shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,220" # Modern icon
+$Shortcut.Arguments = "`"$ScriptDir\launch.vbs`""
+$Shortcut.WorkingDirectory = $ScriptDir
+$Shortcut.Description = "Agente Autónomo de Oficina y Sistema"
 $Shortcut.Save()
-
-Write-Host "Acceso directo creado exitosamente en el Escritorio: $ShortcutPath"
+Write-Host "Acceso directo creado exitosamente en el Escritorio." -ForegroundColor Green
