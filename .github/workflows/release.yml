@@ -53,4 +53,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          npx electron-builder --win --publish always -c.publish.releaseType=release
+          npx electron-builder --win --publish always
