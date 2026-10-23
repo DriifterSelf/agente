@@ -11,7 +11,25 @@ let backendManager = null;
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
+// Clean up old cached installers in %LOCALAPPDATA%\agente-studio-updater\pending
+function cleanOldUpdaterCache() {
+  try {
+    const localAppData = process.env.LOCALAPPDATA || (process.platform === 'win32' && process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'AppData', 'Local') : null);
+    if (!localAppData) return;
+    const pendingDir = path.join(localAppData, 'agente-studio-updater', 'pending');
+    if (fs.existsSync(pendingDir)) {
+      const entries = fs.readdirSync(pendingDir);
+      for (const entry of entries) {
+        try {
+          fs.rmSync(path.join(pendingDir, entry), { recursive: true, force: true });
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+}
+
 function setupAutoUpdater() {
+  cleanOldUpdaterCache();
   autoUpdater.on('checking-for-update', () => {
     mainWindow?.webContents.send('update-status', { status: 'checking' });
   });
@@ -129,12 +147,29 @@ function createWindow() {
   const distHtml = path.join(__dirname, '..', 'dist', 'index.html');
 
   if (process.env.VITE_DEV === 'true') {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://localhost:3000');
   } else if (fs.existsSync(distHtml)) {
     mainWindow.loadFile(distHtml);
   } else {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://localhost:3000');
   }
+
+  // Crash and load error diagnostics
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[Electron] Page failed to load: ${validatedURL} [${errorCode}: ${errorDescription}]`);
+  });
+
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    console.error('[Electron] Renderer process gone:', details);
+  });
+
+  // Allow F12 or Ctrl+Shift+I to open DevTools for troubleshooting if needed
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -150,19 +185,24 @@ function createWindow() {
   });
 }
 
+// Disable hardware acceleration on Windows to prevent GPU compositing black screen
+if (process.platform === 'win32') {
+  app.disableHardwareAcceleration();
+}
+
 app.whenReady().then(async () => {
   const basePath = app.isPackaged ? process.resourcesPath : app.getAppPath();
   backendManager = new BackendManager(basePath);
 
   setupAutoUpdater();
 
-  try {
-    await backendManager.start();
-  } catch (err) {
-    console.error('Failed to start backend:', err);
-  }
-
+  // Display the UI immediately
   createWindow();
+
+  // Start backend asynchronously without blocking window rendering
+  backendManager.start().catch((err) => {
+    console.error('Failed to start backend:', err);
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

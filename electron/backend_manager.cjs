@@ -11,11 +11,20 @@ class BackendManager {
   async start() {
     return new Promise((resolve) => {
       // Check if backend is already running
-      http.get('http://127.0.0.1:8765/api/health', (res) => {
+      const req = http.get('http://127.0.0.1:8765/api/health', (res) => {
         if (res.statusCode === 200) {
           resolve(true);
+        } else {
+          this.spawnBackend(resolve);
         }
-      }).on('error', () => {
+      });
+
+      req.on('error', () => {
+        this.spawnBackend(resolve);
+      });
+
+      req.setTimeout(2000, () => {
+        req.destroy();
         this.spawnBackend(resolve);
       });
     });
