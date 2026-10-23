@@ -88,6 +88,30 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
     }
   }, []);
 
+  const handleMinimize = (e) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    if (window.electronAPI?.minimize) {
+      window.electronAPI.minimize();
+    }
+  };
+
+  const handleMaximize = (e) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    if (window.electronAPI?.maximize) {
+      window.electronAPI.maximize();
+    }
+  };
+
+  const handleClose = (e) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    if (window.electronAPI?.close) {
+      window.electronAPI.close();
+    }
+  };
+
   const handleCheckUpdates = async () => {
     setIsSyncing(true);
     setSyncMessage('Buscando...');
@@ -353,15 +377,43 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
       </div>
 
       {/* Window Controls */}
-      <div className="flex items-center no-drag space-x-0.5 flex-shrink-0">
-        <button onClick={() => window.electronAPI?.minimize()} className="w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition">
-          <Minus size={14} />
+      <div
+        className="flex items-center space-x-0.5 flex-shrink-0"
+        style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' }}
+      >
+        <button
+          type="button"
+          title="Minimizar"
+          onClick={handleMinimize}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="no-drag w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition cursor-pointer"
+          style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' }}
+        >
+          <Minus size={14} className="pointer-events-none" />
         </button>
-        <button onClick={() => window.electronAPI?.maximize()} className="w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition">
-          {isMaximized ? <Copy size={11} className="rotate-180" /> : <Square size={12} />}
+        <button
+          type="button"
+          title={isMaximized ? "Restaurar" : "Maximizar"}
+          onClick={handleMaximize}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="no-drag w-7 h-7 flex items-center justify-center rounded hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition cursor-pointer"
+          style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' }}
+        >
+          {isMaximized ? (
+            <Copy size={11} className="rotate-180 pointer-events-none" />
+          ) : (
+            <Square size={12} className="pointer-events-none" />
+          )}
         </button>
-        <button onClick={() => window.electronAPI?.close()} className="w-7 h-7 flex items-center justify-center rounded hover:bg-rose-600 text-slate-400 hover:text-white transition">
-          <X size={14} />
+        <button
+          type="button"
+          title="Cerrar ventana"
+          onClick={handleClose}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="no-drag w-7 h-7 flex items-center justify-center rounded hover:bg-rose-600 text-slate-400 hover:text-white transition cursor-pointer"
+          style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' }}
+        >
+          <X size={14} className="pointer-events-none" />
         </button>
       </div>
     </div>

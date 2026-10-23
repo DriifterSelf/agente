@@ -17,7 +17,14 @@
         window.electronAPI = {
           _isWebShim: true,
           isElectron: false,
-          minimize: () => {},
+          minimize: () => {
+            console.log('[Applet] Window minimize triggered');
+            const root = document.getElementById('root');
+            if (root) {
+              root.style.opacity = '0.5';
+              setTimeout(() => { root.style.opacity = '1'; }, 200);
+            }
+          },
           maximize: () => {
             if (!document.fullscreenElement) {
               document.documentElement.requestFullscreen?.().catch(() => {});
@@ -25,7 +32,11 @@
               document.exitFullscreen?.().catch(() => {});
             }
           },
-          close: () => {},
+          close: () => {
+            if (window.confirm('¿Deseas reiniciar la sesión de trabajo de Agente Studio?')) {
+              window.location.reload();
+            }
+          },
           isMaximized: async () => !!document.fullscreenElement,
           onMaximizedChange: (cb) => {
             document.addEventListener('fullscreenchange', () => cb(!!document.fullscreenElement));

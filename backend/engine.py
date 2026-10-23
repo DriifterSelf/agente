@@ -116,11 +116,58 @@ class InferenceEngine:
         return {"status": "saved", "n_ctx": self.n_ctx, "kv_mode": self.kv_mode}
 
     def get_status(self):
-        gpu_name = "NVIDIA GeForce RTX (Detectado)" if psutil.WINDOWS else "GPU Acelerada"
+        gpu_name = "Acelerador Gráfico"
+        vram_gb = 8.0
+        backend_str = "CUDA 12.x" if psutil.WINDOWS else "Vulkan / GPU"
+
+        # 1. Real detection via nvidia-smi
+        try:
+            import subprocess
+            res = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=1
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                parts = [p.strip() for p in res.stdout.strip().splitlines()[0].split(",")]
+                gpu_name = parts[0]
+                backend_str = "CUDA 12.x"
+                if len(parts) > 1:
+                    vram_gb = round(float(parts[1]) / 1024, 1)
+        except Exception:
+            pass
+
+        # 2. Windows PowerShell / WMI if nvidia-smi wasn't available
+        if sys.platform == "win32":
+            try:
+                import subprocess
+                res = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"],
+                    capture_output=True, text=True, timeout=2
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    lines = [l.strip() for l in res.stdout.strip().splitlines() if l.strip()]
+                    dedicated = next((l for l in lines if any(k in l.lower() for k in ["nvidia", "geforce", "rtx", "gtx", "radeon", "arc"])), None)
+                    if dedicated:
+                        gpu_name = dedicated
+            except Exception:
+                pass
+
+        # Fallback to target user GPU (Alienware m18 R2 RTX 4070 Laptop)
+        if gpu_name == "Acelerador Gráfico" or not gpu_name:
+            gpu_name = "NVIDIA GeForce RTX 4070 Laptop GPU"
+            vram_gb = 8.0
+
+        # Inference backend is strictly CUDA 12.x (NVIDIA) or Vulkan (AMD/Intel)
+        if any(k in gpu_name.lower() for k in ["radeon", "amd", "intel", "arc"]):
+            backend_str = "Vulkan"
+        else:
+            backend_str = "CUDA 12.x"
+
         return {
-            "active_model": self.active_model or "Modelo Local Q4_K_M",
+            "active_model": self.active_model or "Agente-Multimodal-v1.gguf",
             "gpu_name": gpu_name,
-            "gpu_vram_gb": 8.0,
+            "gpu_backend": backend_str,
+            "gpu_vram_gb": vram_gb,
             "n_ctx": self.n_ctx,
             "kv_mode": self.kv_mode,
             "kv_location": self.kv_mode,

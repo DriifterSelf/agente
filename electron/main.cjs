@@ -80,6 +80,56 @@ function setupAutoUpdater() {
   });
 }
 
+function setupIpcHandlers() {
+  ipcMain.handle('select-folder', async () => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Seleccionar Repositorio Local',
+      properties: ['openDirectory']
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  // Window controls
+  ipcMain.on('window-minimize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (win && !win.isDestroyed()) {
+      win.minimize();
+    }
+  });
+
+  ipcMain.on('window-maximize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (win && !win.isDestroyed()) {
+      if (win.isMaximized()) {
+        win.unmaximize();
+      } else {
+        win.maximize();
+      }
+    }
+  });
+
+  ipcMain.on('window-close', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (win && !win.isDestroyed()) {
+      win.close();
+    }
+  });
+
+  ipcMain.handle('open-path', async (event, fullPath) => {
+    return await shell.openPath(fullPath);
+  });
+
+  ipcMain.handle('open-external', async (event, url) => {
+    return await shell.openExternal(url);
+  });
+
+  ipcMain.handle('window-is-maximized', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    return win && !win.isDestroyed() ? win.isMaximized() : false;
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,
@@ -94,45 +144,6 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true
     }
-  });
-  ipcMain.handle('select-folder', async () => {
-    if (!mainWindow) return null;
-    const result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Seleccionar Repositorio Local',
-      properties: ['openDirectory']
-    });
-    return result.canceled ? null : result.filePaths[0];
-  });
-
-  // Window controls
-  ipcMain.on('window-minimize', () => {
-    if (mainWindow) mainWindow.minimize();
-  });
-
-  ipcMain.on('window-maximize', () => {
-    if (mainWindow) {
-      if (mainWindow.isMaximized()) {
-        mainWindow.unmaximize();
-      } else {
-        mainWindow.maximize();
-      }
-    }
-  });
-
-  ipcMain.on('window-close', () => {
-    if (mainWindow) mainWindow.close();
-  });
-
-  ipcMain.handle('open-path', async (event, fullPath) => {
-    return await shell.openPath(fullPath);
-  });
-
-  ipcMain.handle('open-external', async (event, url) => {
-    return await shell.openExternal(url);
-  });
-
-  ipcMain.handle('window-is-maximized', () => {
-    return mainWindow ? mainWindow.isMaximized() : false;
   });
 
   mainWindow.on('maximize', () => {
@@ -194,6 +205,7 @@ app.whenReady().then(async () => {
   const basePath = app.isPackaged ? process.resourcesPath : app.getAppPath();
   backendManager = new BackendManager(basePath);
 
+  setupIpcHandlers();
   setupAutoUpdater();
 
   // Display the UI immediately
