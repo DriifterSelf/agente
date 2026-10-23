@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
-const BackendManager = require('./backend_manager');
+const BackendManager = require('./backend_manager.cjs');
 
 let mainWindow = null;
 let backendManager = null;
@@ -72,7 +72,7 @@ function createWindow() {
     backgroundColor: '#0B0F17',
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true
     }

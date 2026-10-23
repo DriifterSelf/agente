@@ -3,7 +3,7 @@
   "version": "1.0.1",
   "description": "Agente Autónomo de Oficina y Sistema",
   "author": "DriifterSelf",
-  "main": "electron/main.js",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
