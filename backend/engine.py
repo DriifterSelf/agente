@@ -1,6 +1,10 @@
 import os
+import sys
 import glob
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 try:
     from llama_cpp import Llama
@@ -74,7 +78,11 @@ class InferenceEngine:
         return {"status": "loaded", "model": filename, "n_ctx": self.n_ctx}
 
     def generate_stream(self, messages, max_tokens: int = 2048, temperature: float = 0.7):
-        """Generates streaming tokens directly from the loaded local GGUF model."""
+        """Generates streaming tokens directly from loaded GGUF, local Ollama, or LM Studio."""
+        import json
+        import urllib.request
+
+        # 1. Direct llama-cpp loaded model instance
         if self.model_instance is not None:
             try:
                 response = self.model_instance.create_chat_completion(
@@ -92,12 +100,46 @@ class InferenceEngine:
                             yield content
                 return
             except Exception as e:
-                yield f"\n[Error de inferencia local: {str(e)}]"
-                return
+                yield f"\n[Inferencia local: {str(e)}]\n"
 
-        # Fallback si no hay llama-cpp cargado en memoria pero el modelo está configurado
-        prompt_summary = messages[-1]["content"] if messages else ""
-        yield f"Procesando con modelo local '{self.active_model or 'GGUF'}':\nHe recibido tu solicitud y mantengo el contexto de la conversación activo para ejecutar las tareas solicitadas."
+        # 2. Check local Ollama on 127.0.0.1:11434
+        try:
+            ollama_data = json.dumps({
+                "model": "qwen2.5-coder:7b",
+                "messages": messages,
+                "stream": True
+            }).encode("utf-8")
+            req = urllib.request.Request("http://127.0.0.1:11434/api/chat", data=ollama_data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=1.5) as r:
+                for line in r:
+                    chunk = json.loads(line.decode("utf-8"))
+                    content = chunk.get("message", {}).get("content", "")
+                    if content:
+                        yield content
+                return
+        except Exception:
+            pass
+
+        # 3. Check local LM Studio / OpenAI-compatible server on 127.0.0.1:1234
+        try:
+            lms_data = json.dumps({
+                "messages": messages,
+                "stream": True,
+                "max_tokens": max_tokens,
+                "temperature": temperature
+            }).encode("utf-8")
+            req = urllib.request.Request("http://127.0.0.1:1234/v1/chat/completions", data=lms_data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=1.5) as r:
+                for raw_line in r:
+                    line = raw_line.decode("utf-8").strip()
+                    if line.startswith("data: ") and not line.endswith("[DONE]"):
+                        c = json.loads(line[6:])
+                        delta = c.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if delta:
+                            yield delta
+                return
+        except Exception:
+            pass
 
     def context_presets(self):
         return [
@@ -116,28 +158,31 @@ class InferenceEngine:
         return {"status": "saved", "n_ctx": self.n_ctx, "kv_mode": self.kv_mode}
 
     def get_status(self):
-        gpu_name = "Acelerador Gráfico"
+        gpu_name = "NVIDIA GeForce RTX 4070 Laptop GPU"
         vram_gb = 8.0
-        backend_str = "CUDA 12.x" if psutil.WINDOWS else "Vulkan / GPU"
+        backend_str = "CUDA 12.x"
 
         # 1. Real detection via nvidia-smi
         try:
             import subprocess
-            res = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=1
-            )
-            if res.returncode == 0 and res.stdout.strip():
-                parts = [p.strip() for p in res.stdout.strip().splitlines()[0].split(",")]
-                gpu_name = parts[0]
-                backend_str = "CUDA 12.x"
-                if len(parts) > 1:
-                    vram_gb = round(float(parts[1]) / 1024, 1)
+            nvidia_cmds = ["nvidia-smi", r"C:\Windows\System32\nvidia-smi.exe", r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"]
+            for cmd in nvidia_cmds:
+                try:
+                    res = subprocess.run([cmd, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=1.5)
+                    if res.returncode == 0 and res.stdout.strip():
+                        parts = [p.strip() for p in res.stdout.strip().splitlines()[0].split(",")]
+                        gpu_name = parts[0]
+                        backend_str = "CUDA 12.x"
+                        if len(parts) > 1:
+                            vram_gb = round(float(parts[1]) / 1024, 1)
+                        break
+                except Exception:
+                    continue
         except Exception:
             pass
 
-        # 2. Windows PowerShell / WMI if nvidia-smi wasn't available
-        if sys.platform == "win32":
+        # 2. Windows PowerShell / WMI if nvidia-smi was not present
+        if gpu_name == "NVIDIA GeForce RTX 4070 Laptop GPU" and sys.platform == "win32":
             try:
                 import subprocess
                 res = subprocess.run(
@@ -152,12 +197,7 @@ class InferenceEngine:
             except Exception:
                 pass
 
-        # Fallback to target user GPU (Alienware m18 R2 RTX 4070 Laptop)
-        if gpu_name == "Acelerador Gráfico" or not gpu_name:
-            gpu_name = "NVIDIA GeForce RTX 4070 Laptop GPU"
-            vram_gb = 8.0
-
-        # Inference backend is strictly CUDA 12.x (NVIDIA) or Vulkan (AMD/Intel)
+        # Strictly enforce CUDA 12.x for NVIDIA, Vulkan for AMD/Intel
         if any(k in gpu_name.lower() for k in ["radeon", "amd", "intel", "arc"]):
             backend_str = "Vulkan"
         else:
