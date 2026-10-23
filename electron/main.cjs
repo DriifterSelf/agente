@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
@@ -128,6 +128,45 @@ function setupIpcHandlers() {
     const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
     return win && !win.isDestroyed() ? win.isMaximized() : false;
   });
+
+  // DevTools & Debugging IPC
+  ipcMain.on('open-devtools', (event, mode) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.openDevTools({ mode: mode || 'detach' });
+    }
+  });
+
+  ipcMain.on('toggle-devtools', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.toggleDevTools();
+    }
+  });
+
+  ipcMain.on('window-reload', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.reload();
+    }
+  });
+
+  // Backend diagnostics IPC
+  ipcMain.handle('get-backend-status', () => {
+    return backendManager ? backendManager.getStatus() : { status: 'none' };
+  });
+
+  ipcMain.handle('get-backend-logs', () => {
+    return backendManager ? backendManager.getLogs() : [];
+  });
+
+  ipcMain.handle('restart-backend', async () => {
+    if (backendManager) {
+      backendManager.stop();
+      return await backendManager.start();
+    }
+    return false;
+  });
 }
 
 function createWindow() {
@@ -142,7 +181,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      devTools: true // Explicitly enable DevTools in all builds
     }
   });
 
@@ -152,6 +192,61 @@ function createWindow() {
 
   mainWindow.on('unmaximize', () => {
     mainWindow?.webContents.send('window-maximized-change', false);
+  });
+
+  // Context menu for Inspect Element & DevTools
+  mainWindow.webContents.on('context-menu', (event, params) => {
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Inspeccionar elemento',
+        click: () => {
+          mainWindow.webContents.inspectElement(params.x, params.y);
+          if (!mainWindow.webContents.isDevToolsOpened()) {
+            mainWindow.webContents.openDevTools({ mode: 'detach' });
+          }
+        }
+      },
+      {
+        label: 'Abrir DevTools / Consola (F12)',
+        accelerator: 'F12',
+        click: () => {
+          mainWindow.webContents.openDevTools({ mode: 'detach' });
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Recargar aplicación (Ctrl+R / F5)',
+        accelerator: 'CmdOrCtrl+R',
+        click: () => {
+          mainWindow.webContents.reload();
+        }
+      },
+      { type: 'separator' },
+      { role: 'cut', label: 'Cortar' },
+      { role: 'copy', label: 'Copiar' },
+      { role: 'paste', label: 'Pegar' },
+      { role: 'selectAll', label: 'Seleccionar todo' }
+    ]);
+    contextMenu.popup({ window: mainWindow, x: params.x, y: params.y });
+  });
+
+  // Global keyboard shortcuts (F12, Ctrl+Shift+I, F5, Ctrl+R)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+
+    if (
+      input.key === 'F12' ||
+      ((input.control || input.meta) && input.shift && input.key.toLowerCase() === 'i')
+    ) {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    } else if (
+      input.key === 'F5' ||
+      ((input.control || input.meta) && !input.shift && input.key.toLowerCase() === 'r')
+    ) {
+      mainWindow.webContents.reload();
+      event.preventDefault();
+    }
   });
 
   // Load URL or built file
@@ -174,16 +269,11 @@ function createWindow() {
     console.error('[Electron] Renderer process gone:', details);
   });
 
-  // Allow F12 or Ctrl+Shift+I to open DevTools for troubleshooting if needed
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
-      mainWindow.webContents.toggleDevTools();
-      event.preventDefault();
-    }
-  });
-
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    if (backendManager) {
+      backendManager.setMainWindow(mainWindow);
+    }
     if (app.isPackaged) {
       setTimeout(() => {
         autoUpdater.checkForUpdatesAndNotify();
@@ -211,6 +301,10 @@ app.whenReady().then(async () => {
   // Display the UI immediately
   createWindow();
 
+  if (backendManager && mainWindow) {
+    backendManager.setMainWindow(mainWindow);
+  }
+
   // Start backend asynchronously without blocking window rendering
   backendManager.start().catch((err) => {
     console.error('Failed to start backend:', err);
@@ -235,3 +329,4 @@ app.on('will-quit', () => {
     backendManager.stop();
   }
 });
+

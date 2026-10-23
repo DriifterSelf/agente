@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Minus, Square, Copy, X, Cpu, Sparkles, RefreshCw, DownloadCloud, Check, Brain, ChevronDown } from 'lucide-react';
+import { Minus, Square, Copy, X, Cpu, Sparkles, RefreshCw, DownloadCloud, Check, Brain, ChevronDown, Terminal } from 'lucide-react';
 import { API_BASE } from '../config';
+import DiagnosticModal from './DiagnosticModal';
 
 export default function TitleBar({ activeProject, systemStatus, isBackendConnected, onRefreshStatus, usedTokens = 0 }) {
   const [updateStatus, setUpdateStatus] = useState(null);
@@ -8,6 +9,7 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
   const [syncMessage, setSyncMessage] = useState('');
   const [isMaximized, setIsMaximized] = useState(false);
   const [isContextOpen, setIsContextOpen] = useState(false);
+  const [isDiagOpen, setIsDiagOpen] = useState(false);
   const [serverPresets, setServerPresets] = useState([]);
 
   const FALLBACK_PRESETS = [
@@ -374,6 +376,21 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
             <span className="hidden md:inline">{syncMessage || "Actualizar"}</span>
           </button>
         )}
+
+        {/* DevTools & Diagnostics Button */}
+        <button
+          onClick={() => {
+            if (window.electronAPI?.openDevTools) {
+              window.electronAPI.openDevTools('detach');
+            }
+            setIsDiagOpen(true);
+          }}
+          className="flex items-center space-x-1 bg-surface/80 hover:bg-surfaceHover text-slate-300 hover:text-white px-2 py-0.5 rounded border border-border/80 transition"
+          title="Consola de Desarrollador (F12) - Inspeccionar errores y llamadas"
+        >
+          <Terminal size={11} className="text-blue-400 flex-shrink-0" />
+          <span className="hidden sm:inline font-mono text-[10px]">DevTools</span>
+        </button>
       </div>
 
       {/* Window Controls */}
@@ -416,6 +433,14 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
           <X size={14} className="pointer-events-none" />
         </button>
       </div>
+
+      {/* Diagnostic & DevTools Modal */}
+      <DiagnosticModal
+        isOpen={isDiagOpen}
+        onClose={() => setIsDiagOpen(false)}
+        systemStatus={systemStatus}
+        isBackendConnected={isBackendConnected}
+      />
     </div>
   );
 }
