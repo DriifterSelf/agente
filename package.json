@@ -2,6 +2,7 @@
   "name": "agente-studio",
   "version": "1.0.1",
   "description": "Agente Autónomo de Oficina y Sistema",
+  "author": "DriifterSelf",
   "main": "electron/main.js",
   "type": "module",
   "scripts": {
@@ -49,7 +50,10 @@
     },
     "publish": [
       {
-        "provider": "github"
+        "provider": "github",
+        "owner": "DriifterSelf",
+        "repo": "agente",
+        "releaseType": "release"
       }
     ],
     "files": [
