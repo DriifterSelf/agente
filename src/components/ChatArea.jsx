@@ -209,6 +209,16 @@ export default function ChatArea({
         return `Leyendo página: ${params.url || ''}`;
       case 'execute_task':
         return 'Ejecutando tarea en segundo plano';
+      case 'list_dir':
+        return `Explorando estructura: ${params.path || 'raíz del proyecto'}`;
+      case 'search_code':
+        return `Buscando en código: "${params.query || ''}"`;
+      case 'read_file':
+        return `Leyendo archivo: ${params.file_path || params.filename || ''}`;
+      case 'edit_file':
+        return `Modificando código en: ${params.file_path || ''}`;
+      case 'run_command':
+        return `Terminal: ${params.command || ''}`;
       default:
         return `Ejecutando tarea: ${tool}`;
     }

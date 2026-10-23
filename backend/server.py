@@ -67,18 +67,32 @@ def _safe_project_path(name: str) -> str:
     if not name or not isinstance(name, str):
         raise HTTPException(status_code=400, detail="Nombre de proyecto inválido.")
     clean = os.path.basename(name.strip())
-    # Reemplazar caracteres ilegales en Windows NTFS y caracteres de control
     clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", clean).strip(" .")
     if not clean or clean in (".", "..") or len(clean) > 80:
-        raise HTTPException(status_code=400, detail="Nombre de proyecto inválido o demasiado largo (máx. 80 caracteres).")
+        raise HTTPException(status_code=400, detail="Nombre de proyecto inválido o demasiado largo.")
     if clean.split(".")[0].upper() in WINDOWS_RESERVED:
         raise HTTPException(status_code=400, detail="Nombre reservado de Windows no permitido.")
+
+    # Si es un repositorio local externo, usar la ruta real del disco
+    meta_file = os.path.join(PROJECTS_DIR, f"{clean}.workspace.json")
+    if os.path.exists(meta_file):
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                real_p = json.load(f).get("real_path")
+                if real_p and os.path.exists(real_p):
+                    return os.path.abspath(real_p)
+        except Exception:
+            pass
+
     base_abs = os.path.abspath(PROJECTS_DIR)
     target = os.path.abspath(os.path.join(base_abs, clean))
     if not target.startswith(base_abs + os.sep):
         raise HTTPException(status_code=400, detail="Ruta de proyecto no permitida.")
     return target
 
+class OpenRepoRequest(BaseModel):
+    path: str
+    
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -277,6 +291,58 @@ async def chat_endpoint(req: ChatRequest):
         
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+
+
+
+class OpenRepoRequest(BaseModel):
+    path: str
+
+
+@app.post("/api/workspace/open-repo")
+def open_local_repository(req: OpenRepoRequest):
+    repo_path = os.path.abspath(req.path)
+    if not os.path.exists(repo_path) or not os.path.isdir(repo_path):
+        raise HTTPException(status_code=400, detail="La ruta del repositorio no existe o no es una carpeta.")
+    
+    repo_name = os.path.basename(repo_path.rstrip("/\\"))
+    if not repo_name:
+        raise HTTPException(status_code=400, detail="Ruta de repositorio inválida.")
+
+    # Guardar referencia del repositorio externo
+    meta_file = os.path.join(PROJECTS_DIR, f"{repo_name}.workspace.json")
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump({"name": repo_name, "real_path": repo_path}, f, indent=2)
+
+    # Crear carpeta en projects/ para que aparezca en la barra lateral
+    os.makedirs(os.path.join(PROJECTS_DIR, repo_name), exist_ok=True)
+    return {"name": repo_name, "path": repo_path, "status": "connected"}
+
+
+class SaveChatRequest(BaseModel):
+    messages: List[Dict[str, Any]]
+
+@app.get("/api/projects/{name}/chats")
+def get_project_chats(name: str):
+    target = _safe_project_path(name)
+    chat_file = os.path.join(target, "conversations.json")
+    if os.path.exists(chat_file):
+        try:
+            with open(chat_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+@app.post("/api/projects/{name}/chats")
+def save_project_chats(name: str, req: SaveChatRequest):
+    target = _safe_project_path(name)
+    os.makedirs(target, exist_ok=True)
+    chat_file = os.path.join(target, "conversations.json")
+    with open(chat_file, "w", encoding="utf-8") as f:
+        json.dump(req.messages, f, ensure_ascii=False, indent=2)
+    return {"status": "saved", "count": len(req.messages)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8765)
+

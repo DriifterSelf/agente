@@ -12,13 +12,13 @@ export default function App() {
   const [projectFiles, setProjectFiles] = useState([]);
   const [artifacts, setArtifacts] = useState([]);
   const [messages, setMessages] = useState([]);
-  
+
   // Streaming & abort state
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamContent, setCurrentStreamContent] = useState('');
   const [activeActions, setActiveActions] = useState([]);
   const abortControllerRef = useRef(null);
-  
+
   // Hardware/System state
   const [systemStatus, setSystemStatus] = useState(null);
   const [isBackendConnected, setIsBackendConnected] = useState(false);
@@ -30,15 +30,40 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 2. When activeProject changes: Load files and artifacts
+  // 2. When activeProject changes: Load files and chats
   useEffect(() => {
     if (activeProject) {
       fetchProjectFiles(activeProject);
+      loadProjectChats(activeProject);
     } else {
       setProjectFiles([]);
       setArtifacts([]);
+      setMessages([]);
     }
   }, [activeProject]);
+
+  const loadProjectChats = async (projName) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projName)}/chats`);
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(Array.isArray(data) ? data : []);
+      }
+    } catch (e) {
+      setMessages([]);
+    }
+  };
+
+  const saveProjectChats = async (projName, msgs) => {
+    if (!projName) return;
+    try {
+      await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projName)}/chats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: msgs })
+      });
+    } catch (e) {}
+  };
 
   const checkHealthAndLoad = async () => {
     try {
@@ -62,9 +87,7 @@ export default function App() {
         const data = await res.json();
         setSystemStatus(data);
       }
-    } catch (e) {
-      // Backend busy or restarting
-    }
+    } catch (e) {}
   };
 
   const fetchProjects = async () => {
@@ -73,7 +96,6 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setProjects(data);
-        // If current project was removed or none selected, pick first
         setActiveProject(prev => {
           if (!prev && data.length > 0) return data[0].name;
           if (prev && !data.some(p => p.name === prev)) return data.length > 0 ? data[0].name : '';
@@ -92,8 +114,6 @@ export default function App() {
       if (res.ok) {
         const files = await res.json();
         setProjectFiles(files);
-        
-        // Filter out created deliverables (.xlsx, .docx, .pptx, .pdf, images, zip, audio, video, data)
         const arts = files.filter(f => !f.is_dir && /\.(xlsx|docx|pptx|pdf|csv|png|jpg|jpeg|webp|zip|json|html|md|txt|mp3|wav|m4a|mp4|mkv|mov)$/i.test(f.name));
         setArtifacts(arts);
       }
@@ -114,13 +134,9 @@ export default function App() {
         await fetchProjects();
         setActiveProject(created.name || name);
         setMessages([]);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        alert(`No se pudo crear el proyecto: ${err.detail || 'Verifica el nombre.'}`);
       }
     } catch (e) {
       console.error('Error creating project:', e);
-      alert(`Error conectando con el motor local (${API_BASE}): ${e.message}\nVerifica que el servicio esté activo.`);
     }
   };
 
@@ -131,11 +147,7 @@ export default function App() {
       });
       if (res.ok) {
         await fetchProjects();
-        if (activeProject === name) {
-          setMessages([]);
-        }
-      } else {
-        alert('No se pudo eliminar el proyecto.');
+        if (activeProject === name) setMessages([]);
       }
     } catch (e) {
       console.error('Error deleting project:', e);
@@ -144,9 +156,7 @@ export default function App() {
 
   const handleOpenProjectFolder = async (projName) => {
     try {
-      await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projName)}/open-folder`, {
-        method: 'POST'
-      });
+      await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projName)}/open-folder`, { method: 'POST' });
     } catch (e) {
       console.error('Error opening project folder:', e);
     }
@@ -157,7 +167,6 @@ export default function App() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-
       const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(activeProject)}/upload`, {
         method: 'POST',
         body: formData
@@ -193,21 +202,18 @@ export default function App() {
       abortControllerRef.current.abort();
       setIsStreaming(false);
       if (currentStreamContent) {
-        setMessages(prev => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: currentStreamContent + '\n\n*(Generación detenida por el usuario)*',
-            actions: []
-          }
-        ]);
+        setMessages(prev => {
+          const updated = [...prev, { role: 'assistant', content: currentStreamContent + '\n\n*(Generación detenida)*', actions: [] }];
+          saveProjectChats(activeProject, updated);
+          return updated;
+        });
       }
       setCurrentStreamContent('');
       setActiveActions([]);
     }
   };
 
-const handleSendMessage = async (userText) => {
+  const handleSendMessage = async (userText) => {
     if (!activeProject || isStreaming) return;
 
     const userMsg = { role: 'user', content: userText };
@@ -228,16 +234,11 @@ const handleSendMessage = async (userText) => {
       const response = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_name: activeProject,
-          messages: newMessages
-        }),
+        body: JSON.stringify({ project_name: activeProject, messages: newMessages }),
         signal: controller.signal
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -258,7 +259,6 @@ const handleSendMessage = async (userText) => {
 
             try {
               const event = JSON.parse(dataStr);
-
               if (event.type === 'token') {
                 accumulatedContent += event.content;
                 setCurrentStreamContent(accumulatedContent);
@@ -270,30 +270,21 @@ const handleSendMessage = async (userText) => {
               } else if (event.type === 'artifact_created') {
                 fetchProjectFiles(activeProject);
               }
-            } catch (err) {
-              console.error('Failed to parse SSE event:', err);
-            }
+            } catch (err) {}
           }
         }
       }
 
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: accumulatedContent,
-          actions: completedActions
-        }
-      ]);
+      setMessages(prev => {
+        const finalMsgs = [...prev, { role: 'assistant', content: accumulatedContent, actions: completedActions }];
+        saveProjectChats(activeProject, finalMsgs);
+        return finalMsgs;
+      });
     } catch (e) {
       if (e.name !== 'AbortError') {
-        console.error('Error sending message:', e);
         setMessages(prev => [
           ...prev,
-          {
-            role: 'assistant',
-            content: 'Ocurrió un error al procesar la solicitud. Por favor intenta de nuevo.'
-          }
+          { role: 'assistant', content: 'Ocurrió un error al procesar la solicitud. Revisa la consola o intenta de nuevo.' }
         ]);
       }
     } finally {
@@ -304,26 +295,25 @@ const handleSendMessage = async (userText) => {
     }
   };
 
+  // Estimación en tiempo real de tokens en contexto para el HUD central
+  const totalChars = messages.reduce((acc, m) => acc + (m.content || '').length, 0) + (currentStreamContent || '').length;
+  const estimatedTokens = Math.round(totalChars / 3.7);
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-background">
-      {/* 1. Frameless Custom TitleBar */}
       <TitleBar
         activeProject={activeProject}
         systemStatus={systemStatus}
         isBackendConnected={isBackendConnected}
         onRefreshStatus={fetchSystemStatus}
+        usedTokens={estimatedTokens}
       />
 
-      {/* 2. Main 3-Column Antigravity Layout */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: Projects & Files */}
         <Sidebar
           projects={projects}
           activeProject={activeProject}
-          onSelectProject={(name) => {
-            setActiveProject(name);
-            setMessages([]);
-          }}
+          onSelectProject={(name) => setActiveProject(name)}
           onCreateProject={handleCreateProject}
           onDeleteProject={handleDeleteProject}
           onOpenProjectFolder={handleOpenProjectFolder}
@@ -331,7 +321,6 @@ const handleSendMessage = async (userText) => {
           projectFiles={projectFiles}
         />
 
-        {/* Center: Interactive Chat & Action Capsules */}
         <ChatArea
           messages={messages}
           onSendMessage={handleSendMessage}
@@ -343,7 +332,6 @@ const handleSendMessage = async (userText) => {
           onUploadFile={handleUploadFile}
         />
 
-        {/* Right: Artifacts & Deliverables */}
         <ArtifactsPanel
           artifacts={artifacts}
           onOpenFile={handleOpenFile}

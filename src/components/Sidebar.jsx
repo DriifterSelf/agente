@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Folder, FileText, ExternalLink, Plus, Trash2, AlertCircle, Check, X } from 'lucide-react';
+import { FolderGit } from 'lucide-react';
 
 export default function Sidebar({
   projects,
@@ -36,7 +37,24 @@ export default function Sidebar({
     setErrorMsg('');
     setIsCreating(false);
   };
-
+// Dentro del componente Sidebar:
+const handleOpenLocalRepo = async () => {
+  if (window.electronAPI && window.electronAPI.selectFolder) {
+    const selectedPath = await window.electronAPI.selectFolder();
+    if (selectedPath) {
+      // Conectar el repo con el backend
+      const res = await fetch('http://127.0.0.1:8765/api/workspace/open-repo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: selectedPath })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        onSelectProject(data.name);
+      }
+    }
+  }
+};
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') {
       setIsCreating(false);
@@ -46,23 +64,32 @@ export default function Sidebar({
   };
 
   return (
+    
     <aside className="w-64 bg-[#0D121F] border-r border-border flex flex-col h-full select-none flex-shrink-0">
       {/* Header */}
-      <div className="p-3 border-b border-border flex items-center justify-between">
+<div className="p-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center space-x-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
           <Folder size={14} className="text-blue-400" />
-          <span>Proyectos</span>
+          <span>Workspace</span>
         </div>
-        <button
-          onClick={() => {
-            setIsCreating(true);
-            setErrorMsg('');
-          }}
-          className="p-1 rounded hover:bg-surfaceHover text-slate-400 hover:text-blue-400 transition"
-          title="Nuevo Proyecto"
-        >
-          <Plus size={16} />
-        </button>
+        <div className="flex items-center space-x-1">
+          {/* Botón para abrir repo existente de tu PC */}
+          <button
+            onClick={handleOpenLocalRepo}
+            className="p-1 rounded hover:bg-surfaceHover text-slate-400 hover:text-emerald-400 transition"
+            title="Abrir Repositorio Local"
+          >
+            <FolderGit size={16} />
+          </button>
+          {/* Botón de nuevo proyecto */}
+          <button
+            onClick={() => setIsCreating(true)}
+            className="p-1 rounded hover:bg-surfaceHover text-slate-400 hover:text-blue-400 transition"
+            title="Nuevo Proyecto"
+          >
+            <Plus size={16} />
+          </button>
+        </div>
       </div>
 
       {/* New Project Input */}

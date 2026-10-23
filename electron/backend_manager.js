@@ -5,17 +5,14 @@ const fs = require('fs');
 
 class BackendManager {
   constructor(appPath) {
-    // Si corre desde el .exe empaquetado (app.asar), usar process.resourcesPath automáticamente
-    const baseDir = (process.resourcesPath && appPath.includes('app.asar'))
-      ? process.resourcesPath
-      : appPath;
-    this.appPath = path.resolve(baseDir);
+    const hasResBackend = process.resourcesPath && fs.existsSync(path.join(process.resourcesPath, 'backend', 'server.py'));
+    this.appPath = hasResBackend ? path.resolve(process.resourcesPath) : path.resolve(appPath);
     this.process = null;
     this.port = 8765;
   }
 
   start() {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const isWin = process.platform === 'win32';
       const embeddedPy = path.join(this.appPath, 'runtime', 'python', 'python.exe');
       const venvPy = isWin
@@ -24,7 +21,6 @@ class BackendManager {
       const pythonExe = fs.existsSync(embeddedPy) ? embeddedPy : venvPy;
 
       const serverScript = path.join(this.appPath, 'backend', 'server.py');
-
       const logFile = path.join(this.appPath, 'backend.log');
       const logStream = fs.createWriteStream(logFile, { flags: 'a' });
 
@@ -45,13 +41,16 @@ class BackendManager {
       this.process.stdout.pipe(logStream);
       this.process.stderr.pipe(logStream);
 
+      this.process.on('error', (err) => {
+        logStream.write(`[BackendManager] Spawn error: ${err.message}\n`);
+      });
+
       this.process.on('close', (code) => {
         logStream.write(`[BackendManager] Process exited with code ${code}\n`);
       });
 
-      // Poll until server is ready
       let attempts = 0;
-      const maxAttempts = 30; // 15 seconds
+      const maxAttempts = 30;
       const interval = setInterval(() => {
         attempts++;
         const req = http.get(`http://127.0.0.1:${this.port}/api/health`, (res) => {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Minus, Square, Copy, X, Cpu, Sparkles, RefreshCw, DownloadCloud, Check, Brain, ChevronDown } from 'lucide-react';
 
-export default function TitleBar({ activeProject, systemStatus, isBackendConnected, onRefreshStatus }) {
+export default function TitleBar({ activeProject, systemStatus, isBackendConnected, onRefreshStatus, usedTokens = 0 }) {
   const [updateStatus, setUpdateStatus] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
@@ -135,6 +135,56 @@ export default function TitleBar({ activeProject, systemStatus, isBackendConnect
             {activeProject || 'Sin proyecto'}
           </span>
         </div>
+      </div>
+
+      {/* HUD Central: Monitor de Contexto Restante */}
+      <div className="hidden md:flex items-center justify-center flex-1 max-w-sm mx-2 no-drag">
+        {(() => {
+          const maxTokens = systemStatus?.n_ctx || 40960;
+          const used = Math.min(usedTokens, maxTokens);
+          const percentUsed = Math.min(100, Math.round((used / maxTokens) * 100));
+          const percentFree = 100 - percentUsed;
+          const usedK = (used / 1024).toFixed(1);
+          const maxK = Math.round(maxTokens / 1024);
+          const remainingTokens = Math.max(0, maxTokens - used);
+
+          const barColor =
+            percentUsed > 85 ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]' :
+            percentUsed > 65 ? 'bg-amber-400' :
+            'bg-emerald-400';
+
+          const textColor =
+            percentUsed > 85 ? 'text-rose-400 font-bold' :
+            percentUsed > 65 ? 'text-amber-300' :
+            'text-emerald-300';
+
+          return (
+            <div
+              className="flex items-center space-x-2.5 bg-surface/70 hover:bg-surface border border-border/80 px-3 py-1 rounded-full text-[11px] transition cursor-default shadow-inner"
+              title={`Contexto consumido: ~${used.toLocaleString()} tokens\nRestante disponible: ~${remainingTokens.toLocaleString()} tokens\nLímite máximo: ${maxTokens.toLocaleString()} tokens`}
+            >
+              <div className="flex items-center space-x-1.5 font-mono">
+                <span className="text-slate-400 text-[10px]">CTX</span>
+                <span className="font-semibold text-slate-200">{usedK}K</span>
+                <span className="text-slate-500">/</span>
+                <span className="text-slate-400">{maxK}K</span>
+              </div>
+
+              {/* Barra de progreso */}
+              <div className="w-20 lg:w-28 h-1.5 bg-slate-800/90 rounded-full overflow-hidden border border-slate-700/50">
+                <div
+                  className={`h-full ${barColor} transition-all duration-300 rounded-full`}
+                  style={{ width: `${Math.max(percentUsed, 3)}%` }}
+                />
+              </div>
+
+              {/* Porcentaje libre */}
+              <span className={`font-mono text-[10px] font-semibold ${textColor}`}>
+                {percentFree}% libre
+              </span>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Hardware & OTA Updates */}

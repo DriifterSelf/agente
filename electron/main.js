@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
@@ -77,6 +77,14 @@ function createWindow() {
       contextIsolation: true
     }
   });
+  ipcMain.handle('select-folder', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Seleccionar Repositorio Local',
+    properties: ['openDirectory']
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
 
   // Window controls
   ipcMain.on('window-minimize', () => {
@@ -130,6 +138,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+     mainWindow.webContents.openDevTools({ mode: 'detach' }); // <--- Abre la consola flotante sin aplastar la UI
     // Check for updates on startup
     if (app.isPackaged) {
           mainWindow.webContents.openDevTools({ mode: 'detach' });
