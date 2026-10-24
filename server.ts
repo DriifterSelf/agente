@@ -256,7 +256,17 @@ app.get('/api/system/status', (_req: Request, res: Response) => {
     gpu_name: hw.gpuName,
     gpu_backend: hw.gpuBackend,
     gpu_vram: hw.gpuVram,
-    use_ram_for_kv: currentContextConfig.kv_mode === 'ram'
+    use_ram_for_kv: currentContextConfig.kv_mode === 'ram',
+    has_runtime: true
+  });
+});
+
+app.post('/api/system/download-runtime', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    runtime_path: 'runtime/llama-server.exe',
+    engine_state: 'ready',
+    engine_message: 'Motor de inferencia activo'
   });
 });
 

@@ -1,5 +1,6 @@
 import os
 import sys
+import ssl
 import glob
 import json
 import time
@@ -8,6 +9,7 @@ import zipfile
 import threading
 import subprocess
 import urllib.request
+import urllib.error
 from typing import List, Dict, Any, Optional
 
 try:
@@ -28,6 +30,23 @@ class InferenceEngine:
     mediante binarios nativos de llama.cpp (runtime/llama-server.exe) o llama-cpp-python.
     """
 
+    OFFICIAL_MODELS = [
+        {
+            "filename": "Qwen3-30B-A3B-Q4_K_M.gguf",
+            "expected_gb": 17.3,
+            "badge": "MoE • 64GB DDR5 + GPU",
+            "desc": "Arquitectura Mixture-of-Experts (30B totales, 3B activos) • Máximo razonamiento",
+            "url": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf?download=true"
+        },
+        {
+            "filename": "Qwen3-8B-Q4_K_M.gguf",
+            "expected_gb": 4.68,
+            "badge": "100% VRAM • Ultrarrápido",
+            "desc": "100% en los 8GB VRAM de tu RTX 4070 • Respuesta instantánea",
+            "url": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf?download=true"
+        }
+    ]
+
     def __init__(self, models_dir: str):
         self.models_dir = models_dir
         self.root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,6 +63,9 @@ class InferenceEngine:
         self.engine_state: str = "idle"  # "idle" | "loading" | "ready" | "no_model"
         self.engine_message: str = "Inicializando motor..."
         self._lock = threading.Lock()
+
+    def _log(self, msg: str):
+        print(f"[InferenceEngine] {msg}", flush=True)
 
     def _get_candidate_model_dirs(self) -> List[str]:
         dirs = [
@@ -69,23 +91,6 @@ class InferenceEngine:
             return magic == b"GGUF"
         except Exception:
             return False
-
-    OFFICIAL_MODELS = [
-        {
-            "filename": "Qwen3-30B-A3B-Q4_K_M.gguf",
-            "expected_gb": 17.3,
-            "badge": "MoE • 64GB DDR5 + GPU",
-            "desc": "Arquitectura Mixture-of-Experts (30B totales, 3B activos) • Máximo razonamiento",
-            "url": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf?download=true"
-        },
-        {
-            "filename": "Qwen3-8B-Q4_K_M.gguf",
-            "expected_gb": 4.68,
-            "badge": "100% VRAM • Ultrarrápido",
-            "desc": "100% en los 8GB VRAM de tu RTX 4070 • Respuesta instantánea",
-            "url": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf?download=true"
-        }
-    ]
 
     def list_available_models(self) -> List[Dict[str, Any]]:
         """Devuelve únicamente los modelos .gguf válidos e instalados en disco."""
@@ -132,12 +137,11 @@ class InferenceEngine:
         installed_map = {m["filename"].lower(): m for m in installed_list}
         catalog = []
 
-        # 1. Incluir primero los modelos oficiales (instalados o pendientes de descarga)
         for off in self.OFFICIAL_MODELS:
             key = off["filename"].lower()
             if key in installed_map:
                 item = dict(installed_map[key])
-                item["active"] = (self.active_model and self.active_model.lower() == key)
+                item["active"] = bool(self.active_model and self.active_model.lower() == key)
                 catalog.append(item)
             else:
                 target_path = os.path.join(self.models_dir, off["filename"])
@@ -153,18 +157,17 @@ class InferenceEngine:
                     "partial_gb": partial_gb,
                     "path": target_path,
                     "installed": False,
-                    "active": (self.active_model and self.active_model.lower() == key),
+                    "active": bool(self.active_model and self.active_model.lower() == key),
                     "badge": off["badge"],
                     "desc": off["desc"],
                     "url": off["url"]
                 })
 
-        # 2. Agregar cualquier otro archivo .gguf personalizado que el usuario tenga en models/
         official_keys = {m["filename"].lower() for m in self.OFFICIAL_MODELS}
         for inst in installed_list:
             if inst["filename"].lower() not in official_keys:
                 item = dict(inst)
-                item["active"] = (self.active_model and self.active_model.lower() == inst["filename"].lower())
+                item["active"] = bool(self.active_model and self.active_model.lower() == inst["filename"].lower())
                 catalog.append(item)
 
         return catalog
@@ -203,21 +206,22 @@ class InferenceEngine:
 
     def _find_llama_server_binary(self) -> Optional[str]:
         exe_name = "llama-server.exe" if sys.platform == "win32" else "llama-server"
-        candidates = [
-            os.path.join(self.root_dir, "runtime", exe_name),
-            os.path.join(os.path.dirname(self.root_dir), "runtime", exe_name),
-            os.path.join(self.user_home_dir, "runtime", exe_name),
+        search_roots = [
+            os.path.join(self.user_home_dir, "runtime"),
+            os.path.join(self.root_dir, "runtime"),
+            os.path.join(os.path.dirname(self.root_dir), "runtime"),
         ]
         appdata = os.environ.get("APPDATA")
         if appdata:
-            candidates.append(os.path.join(appdata, "AgenteStudio", "runtime", exe_name))
+            search_roots.append(os.path.join(appdata, "AgenteStudio", "runtime"))
+        localappdata = os.environ.get("LOCALAPPDATA")
+        if localappdata:
+            search_roots.append(os.path.join(localappdata, "AgenteStudio", "runtime"))
 
-        for c in candidates:
-            if os.path.isfile(c):
-                return c
-
-        # Buscar recursivamente dentro de runtime/ por si se extrajo en subcarpeta
-        for base in [os.path.join(self.root_dir, "runtime"), os.path.join(self.user_home_dir, "runtime")]:
+        for base in search_roots:
+            direct = os.path.join(base, exe_name)
+            if os.path.isfile(direct):
+                return direct
             if os.path.isdir(base):
                 for root, _, files in os.walk(base):
                     if exe_name in files:
@@ -225,8 +229,13 @@ class InferenceEngine:
         return None
 
     def ensure_runtime(self) -> Optional[str]:
+        """
+        Verifica si existe llama-server.exe. Si no existe, lo descarga automáticamente
+        usando curl.exe nativo de Windows (--ssl-no-revoke) para evitar errores SSL en Python embebido.
+        """
         existing = self._find_llama_server_binary()
         if existing:
+            self._log(f"Binario nativo GPU encontrado en: {existing}")
             return existing
 
         if sys.platform != "win32":
@@ -235,36 +244,107 @@ class InferenceEngine:
         target_runtime_dir = os.path.join(self.user_home_dir, "runtime")
         os.makedirs(target_runtime_dir, exist_ok=True)
         zip_dest = os.path.join(target_runtime_dir, "llama-runtime.zip")
+        release_json_path = os.path.join(target_runtime_dir, "release_latest.json")
 
         try:
             self.engine_state = "loading"
-            self.engine_message = "Descargando binarios nativos GPU (llama-server.exe)..."
-            print("[InferenceEngine] Descargando runtime GPU desde ggml-org/llama.cpp...")
+            self.engine_message = "Descargando binarios GPU de llama.cpp (llama-server.exe)..."
+            self._log("No se encontró llama-server.exe. Consultando última release oficial de ggml-org/llama.cpp...")
 
-            req = urllib.request.Request(
-                "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
-                headers={"User-Agent": "AgenteStudio/1.0", "Accept": "application/vnd.github+json"}
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                release_data = json.loads(resp.read().decode("utf-8"))
+            release_data = None
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
-            assets = release_data.get("assets", [])
+            # 1. Consultar API de GitHub con curl.exe --ssl-no-revoke (inmune a errores de certificados de Python embed)
+            try:
+                curl_res = subprocess.run(
+                    [
+                        "curl.exe",
+                        "--ssl-no-revoke",
+                        "-sL",
+                        "-H", "User-Agent: AgenteStudio/1.0",
+                        "-H", "Accept: application/vnd.github+json",
+                        "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
+                        "-o", release_json_path
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                    creationflags=creation_flags
+                )
+                if curl_res.returncode == 0 and os.path.exists(release_json_path):
+                    with open(release_json_path, "r", encoding="utf-8", errors="replace") as rf:
+                        release_data = json.load(rf)
+                    try:
+                        os.remove(release_json_path)
+                    except Exception:
+                        pass
+            except Exception as e_curl:
+                self._log(f"Aviso consultando con curl.exe: {e_curl}")
+
+            # Fallback con urllib + contexto SSL sin verificación
+            if not release_data:
+                ctx = ssl._create_unverified_context()
+                req = urllib.request.Request(
+                    "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
+                    headers={"User-Agent": "AgenteStudio/1.0", "Accept": "application/vnd.github+json"}
+                )
+                with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
+                    release_data = json.loads(resp.read().decode("utf-8"))
+
+            assets = release_data.get("assets", []) if isinstance(release_data, dict) else []
             asset_url = None
-            for pattern in ["bin-win-vulkan-x64.zip", "bin-win-avx2-x64.zip"]:
+            asset_name = None
+
+            # Seleccionar bin-win-vulkan-x64.zip (22 MB, incluye todas las DLLs GPU para NVIDIA RTX 4070 y AMD sin requerir 500MB de cudart externo)
+            for pattern in ["bin-win-vulkan-x64.zip", "bin-win-avx2-x64.zip", "bin-win-x64.zip"]:
                 for a in assets:
-                    if a.get("name", "").lower().endswith(pattern):
+                    name_val = a.get("name", "")
+                    if name_val.lower().endswith(pattern):
                         asset_url = a.get("browser_download_url")
+                        asset_name = name_val
                         break
                 if asset_url:
                     break
 
             if not asset_url:
+                self._log("No se encontró paquete zip compatible en la release de llama.cpp.")
                 return None
 
-            dl_req = urllib.request.Request(asset_url, headers={"User-Agent": "AgenteStudio/1.0"})
-            with urllib.request.urlopen(dl_req, timeout=120) as dl_resp, open(zip_dest, "wb") as out_f:
-                shutil.copyfileobj(dl_resp, out_f)
+            self._log(f"Descargando {asset_name} desde {asset_url} ...")
+            self.engine_message = f"Descargando {asset_name} (~22 MB)..."
 
+            # 2. Descargar zip con curl.exe --ssl-no-revoke
+            dl_ok = False
+            try:
+                dl_proc = subprocess.run(
+                    [
+                        "curl.exe",
+                        "--ssl-no-revoke",
+                        "-L",
+                        "--fail",
+                        "--retry", "5",
+                        "--retry-delay", "2",
+                        asset_url,
+                        "-o", zip_dest
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                    creationflags=creation_flags
+                )
+                if dl_proc.returncode == 0 and os.path.exists(zip_dest) and os.path.getsize(zip_dest) > 1000000:
+                    dl_ok = True
+            except Exception as e_dl:
+                self._log(f"Aviso descargando zip con curl.exe: {e_dl}")
+
+            if not dl_ok:
+                ctx = ssl._create_unverified_context()
+                dl_req = urllib.request.Request(asset_url, headers={"User-Agent": "AgenteStudio/1.0"})
+                with urllib.request.urlopen(dl_req, timeout=180, context=ctx) as dl_resp, open(zip_dest, "wb") as out_f:
+                    shutil.copyfileobj(dl_resp, out_f)
+
+            self._log(f"Extrayendo binarios de inferencia en {target_runtime_dir} ...")
+            self.engine_message = "Extrayendo binarios GPU (llama-server.exe)..."
             with zipfile.ZipFile(zip_dest, "r") as zf:
                 zf.extractall(target_runtime_dir)
 
@@ -273,9 +353,26 @@ class InferenceEngine:
             except Exception:
                 pass
 
-            return self._find_llama_server_binary()
+            # Si se extrajo en una subcarpeta (ej. build/bin/), copiar ejecutables y DLLs a la raíz de target_runtime_dir
+            direct_exe = os.path.join(target_runtime_dir, "llama-server.exe")
+            if not os.path.isfile(direct_exe):
+                for root, _, files in os.walk(target_runtime_dir):
+                    for f in files:
+                        if f.lower().endswith((".exe", ".dll")):
+                            src_p = os.path.join(root, f)
+                            dst_p = os.path.join(target_runtime_dir, f)
+                            if os.path.abspath(src_p) != os.path.abspath(dst_p) and not os.path.exists(dst_p):
+                                try:
+                                    shutil.copy2(src_p, dst_p)
+                                except Exception:
+                                    pass
+
+            found_bin = self._find_llama_server_binary()
+            if found_bin:
+                self._log(f"¡Runtime GPU instalado correctamente en: {found_bin}!")
+            return found_bin
         except Exception as e:
-            print(f"[InferenceEngine] No se pudo descargar llama-server automáticamente: {e}")
+            self._log(f"Error al descargar llama-server automáticamente: {e}")
             return None
 
     def auto_start(self):
@@ -284,7 +381,6 @@ class InferenceEngine:
             first = models[0]
             self.active_model = first["filename"]
             self.active_model_path = first["path"]
-            # Iniciar carga en hilo en segundo plano para no bloquear el arranque de FastAPI
             threading.Thread(
                 target=self.load_model,
                 args=(first["filename"],),
@@ -307,13 +403,27 @@ class InferenceEngine:
                     pass
             self.server_process = None
 
-    def _is_llama_server_healthy(self) -> bool:
+    def _check_llama_server_state(self) -> str:
+        """
+        Retorna:
+        - 'ready': HTTP 200 OK en /health (modelo cargado y listo para inferir)
+        - 'loading': HTTP 503 en /health (llama-server está leyendo el GGUF en RAM/VRAM)
+        - 'down': No responde
+        """
         try:
             req = urllib.request.Request(f"http://127.0.0.1:{self.server_port}/health")
             with urllib.request.urlopen(req, timeout=1.5) as r:
-                return r.status == 200
+                if r.status == 200:
+                    return "ready"
+        except urllib.error.HTTPError as he:
+            if he.code == 503:
+                return "loading"
         except Exception:
-            return False
+            pass
+        return "down"
+
+    def _is_llama_server_healthy(self) -> bool:
+        return self._check_llama_server_state() == "ready"
 
     def _compute_hardware_tuning(self, model_path: str, requested_gpu_layers: int = 35):
         size_gb = 4.7
@@ -325,14 +435,14 @@ class InferenceEngine:
         fname_low = os.path.basename(model_path).lower()
         is_moe_30b = "30b" in fname_low or size_gb > 10.0
 
-        # Determinar ubicación de caché KV y capas en GPU para 8GB VRAM + 64GB DDR5
         if is_moe_30b:
-            # Qwen3-30B-A3B (~17.3 GB MoE): Offload híbrido VRAM + 64GB DDR5 RAM
-            gpu_layers = 22
+            # Qwen3-30B-A3B (~17.3 GB MoE, 48 capas):
+            # En 8GB VRAM + 64GB DDR5, 15 capas en GPU (~5.2 GB VRAM) + resto y KV en 64GB DDR5 RAM
+            gpu_layers = 15 if self.kv_mode != "ram" else 10
             kv_loc = "ram" if self.kv_mode in ("auto", "ram") else "gpu"
         else:
             # Qwen3-8B (~4.68 GB): 100% de las capas caben en 8GB VRAM
-            gpu_layers = 99 if self.kv_mode != "ram" else 35
+            gpu_layers = 99 if self.kv_mode != "ram" else 28
             if self.kv_mode == "ram":
                 kv_loc = "ram"
             elif self.kv_mode == "gpu":
@@ -342,12 +452,71 @@ class InferenceEngine:
 
         return gpu_layers, kv_loc
 
+    def _try_launch_llama_server(self, llama_bin: str, model_path: str, filename: str, gpu_layers: int, kv_loc: str) -> bool:
+        self.stop()
+        threads = max(4, min(16, (os.cpu_count() or 8) - 2))
+        cmd = [
+            llama_bin,
+            "-m", model_path,
+            "--host", "127.0.0.1",
+            "--port", str(self.server_port),
+            "-c", str(self.n_ctx),
+            "-ngl", str(gpu_layers),
+            "-t", str(threads),
+        ]
+        if kv_loc == "ram":
+            cmd.append("-nkvo")
+
+        self._log(f"Iniciando llama-server: {' '.join(cmd)}")
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        self.server_process = subprocess.Popen(
+            cmd,
+            cwd=os.path.dirname(llama_bin),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creation_flags
+        )
+
+        # Hilo lector de logs de llama-server para mostrar progreso en DevTools
+        def _stream_logs(proc):
+            try:
+                for line in proc.stdout:
+                    line_s = line.strip()
+                    if line_s and any(k in line_s.lower() for k in ["error", "listening", "loaded", "offload", "vulkan", "cuda", "kv"]):
+                        self._log(f"[llama-server] {line_s}")
+            except Exception:
+                pass
+
+        threading.Thread(target=_stream_logs, args=(self.server_process,), daemon=True).start()
+
+        # Esperar hasta 120 segundos (un modelo de 17.3 GB puede tardar 25-60s en mapearse en RAM/VRAM)
+        for tick in range(240):
+            state = self._check_llama_server_state()
+            if state == "ready":
+                self.engine_state = "ready"
+                self.engine_message = f"{filename} activo ({gpu_layers} capas GPU)"
+                self._log(f"¡{filename} cargado y listo en puerto {self.server_port}!")
+                return True
+            elif state == "loading":
+                elapsed = int(tick * 0.5)
+                self.engine_state = "loading"
+                self.engine_message = f"Cargando {filename} en GPU + DDR5 ({elapsed}s)..."
+
+            if self.server_process.poll() is not None:
+                self._log(f"llama-server finalizó prematuramente con código {self.server_process.returncode} (ngl={gpu_layers})")
+                return False
+            time.sleep(0.5)
+
+        return False
+
     def load_model(self, filename: str, n_gpu_layers: int = 35, n_ctx: int = None):
         with self._lock:
             if n_ctx:
                 self.n_ctx = n_ctx
 
-            # Resolver ruta completa del modelo
             model_path = None
             for m in self.list_available_models():
                 if m["filename"].lower() == filename.lower():
@@ -356,9 +525,11 @@ class InferenceEngine:
                     break
 
             if not model_path:
-                candidate = os.path.join(self.models_dir, filename)
-                if os.path.exists(candidate):
-                    model_path = candidate
+                for d in self._get_candidate_model_dirs():
+                    candidate = os.path.join(d, filename)
+                    if os.path.exists(candidate):
+                        model_path = candidate
+                        break
 
             if not model_path or not os.path.exists(model_path):
                 self.engine_state = "no_model"
@@ -368,57 +539,38 @@ class InferenceEngine:
             self.active_model = filename
             self.active_model_path = model_path
             self.engine_state = "loading"
-            self.engine_message = f"Cargando {filename} en GPU + DDR5..."
+            self.engine_message = f"Preparando {filename}..."
 
             gpu_layers, kv_loc = self._compute_hardware_tuning(model_path, n_gpu_layers)
             self.n_gpu_layers = gpu_layers
             self.kv_location = kv_loc
 
-            # 1. Intentar lanzar binario nativo llama-server.exe (Soporte nativo Qwen3 + MoE + GPU)
+            # 1. Asegurar binario nativo llama-server.exe y lanzar con fallback automático de capas GPU
             llama_bin = self.ensure_runtime()
             if llama_bin and os.path.exists(llama_bin):
-                self.stop()
-                threads = max(4, (os.cpu_count() or 8) - 2)
-                cmd = [
-                    llama_bin,
-                    "-m", model_path,
-                    "--host", "127.0.0.1",
-                    "--port", str(self.server_port),
-                    "-c", str(self.n_ctx),
-                    "-ngl", str(gpu_layers),
-                    "-t", str(threads),
+                # Intentar primero con el perfil GPU óptimo; si falla por VRAM insuficiente, probar con menos capas
+                fallback_profiles = [
+                    (gpu_layers, kv_loc),
+                    (8, "ram"),
+                    (0, "ram")
                 ]
-                if kv_loc == "ram":
-                    cmd.append("-nkvo")
+                seen_profiles = set()
+                for ngl_try, kv_try in fallback_profiles:
+                    if (ngl_try, kv_try) in seen_profiles:
+                        continue
+                    seen_profiles.add((ngl_try, kv_try))
+                    if self._try_launch_llama_server(llama_bin, model_path, filename, ngl_try, kv_try):
+                        self.n_gpu_layers = ngl_try
+                        self.kv_location = kv_try
+                        return {
+                            "status": "loaded",
+                            "model": filename,
+                            "n_ctx": self.n_ctx,
+                            "gpu_layers": ngl_try,
+                            "kv_location": kv_try
+                        }
 
-                try:
-                    creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                    self.server_process = subprocess.Popen(
-                        cmd,
-                        cwd=os.path.dirname(llama_bin),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        creationflags=creation_flags
-                    )
-                    # Esperar hasta 45 segundos a que cargue el modelo GGUF
-                    for _ in range(90):
-                        if self._is_llama_server_healthy():
-                            self.engine_state = "ready"
-                            self.engine_message = f"{filename} activo en GPU ({gpu_layers} capas)"
-                            return {
-                                "status": "loaded",
-                                "model": filename,
-                                "n_ctx": self.n_ctx,
-                                "gpu_layers": gpu_layers,
-                                "kv_location": kv_loc
-                            }
-                        if self.server_process.poll() is not None:
-                            break
-                        time.sleep(0.5)
-                except Exception as e:
-                    print(f"[InferenceEngine] Error iniciando llama-server: {e}")
-
-            # 2. Fallback: llama-cpp-python si está instalado en Python
+            # 2. Fallback: llama-cpp-python si está instalado
             if Llama is not None:
                 try:
                     self.model_instance = None
@@ -432,27 +584,33 @@ class InferenceEngine:
                     self.engine_message = f"{filename} cargado en memoria"
                     return {"status": "loaded", "model": filename, "n_ctx": self.n_ctx, "gpu_layers": gpu_layers}
                 except Exception as e:
-                    print(f"[InferenceEngine] Aviso en llama_cpp: {e}")
+                    self._log(f"Aviso en llama_cpp: {e}")
 
-            self.engine_state = "ready"
-            self.engine_message = f"Modelo detectado: {filename}"
-            return {"status": "loaded", "model": filename, "n_ctx": self.n_ctx}
+            self.engine_state = "no_model"
+            self.engine_message = f"Falta runtime/llama-server.exe para iniciar {filename}"
+            return {"status": "error", "model": filename, "message": self.engine_message}
 
     def generate_stream(self, messages: List[Dict[str, str]], max_tokens: int = 2048, temperature: float = 0.6):
         """
-        Genera tokens en streaming desde:
-        1. Nuestro proceso nativo llama-server.exe (127.0.0.1:8081)
-        2. Instancia directa de llama-cpp-python
-        3. Servidor local compatible con OpenAI (LM Studio / llama-server externo en 1234 o 8080)
-        4. Servidor local Ollama (11434)
+        Genera tokens en streaming desde llama-server.exe (puerto 8081).
+        Si el modelo está terminando de cargarse en RAM/VRAM, espera automáticamente a que esté listo.
         """
-        # Si hay un modelo GGUF disponible pero el servidor aún no ha arrancado, asegurarlo
-        if not self._is_llama_server_healthy() and self.model_instance is None:
-            models = self.list_available_models()
-            if models and self.engine_state != "loading":
-                self.load_model(models[0]["filename"])
+        # Si llama-server está en estado 'loading' (cargando el archivo de 17.3 GB), esperar hasta 60s
+        if self._check_llama_server_state() == "loading" or self.engine_state == "loading":
+            yield "*(Cargando modelo en GPU + DDR5, un momento por favor...)*\n\n"
+            for _ in range(120):
+                if self._is_llama_server_healthy():
+                    break
+                time.sleep(0.5)
 
-        # 1. Consultar llama-server.exe gestionado (puerto 8081) o puertos locales OpenAI (8080, 1234)
+        # Si aún no se ha iniciado el proceso y hay modelos disponibles, lanzarlo ahora
+        if self._check_llama_server_state() == "down" and self.model_instance is None:
+            models = self.list_available_models()
+            if models:
+                target_name = self.active_model or models[0]["filename"]
+                self.load_model(target_name)
+
+        # 1. Consultar llama-server.exe gestionado (puerto 8081) o servidores locales (8080, 1234)
         for port in [self.server_port, 8080, 1234]:
             try:
                 payload = json.dumps({
@@ -466,7 +624,7 @@ class InferenceEngine:
                     data=payload,
                     headers={"Content-Type": "application/json"}
                 )
-                with urllib.request.urlopen(req, timeout=120 if port == self.server_port else 2.0) as r:
+                with urllib.request.urlopen(req, timeout=180 if port == self.server_port else 2.0) as r:
                     in_think = False
                     for raw_line in r:
                         line = raw_line.decode("utf-8", errors="replace").strip()
@@ -479,7 +637,6 @@ class InferenceEngine:
                             c = json.loads(data_str)
                             delta = c.get("choices", [{}])[0].get("delta", {}).get("content", "")
                             if delta:
-                                # Filtrar etiquetas <think> vacías de Qwen3 si aparecen
                                 if "<think>" in delta:
                                     in_think = True
                                     delta = delta.replace("<think>", "")
@@ -567,7 +724,6 @@ class InferenceEngine:
         vram_gb = 8.0
         backend_str = "CUDA 12.x"
 
-        # 1. Detección real vía nvidia-smi
         try:
             nvidia_cmds = [
                 "nvidia-smi",
@@ -596,7 +752,6 @@ class InferenceEngine:
         except Exception:
             pass
 
-        # 2. Windows PowerShell / WMI si nvidia-smi no respondió
         if gpu_name == "NVIDIA GeForce RTX 4070 Laptop GPU" and sys.platform == "win32":
             try:
                 res = subprocess.run(
@@ -619,15 +774,20 @@ class InferenceEngine:
         else:
             backend_str = "CUDA 12.x"
 
-        # Si aún no hay active_model asignado, verificar si se descargó un modelo recientemente
         if not self.active_model:
             models = self.list_available_models()
             if models:
                 self.active_model = models[0]["filename"]
                 self.active_model_path = models[0]["path"]
 
-        is_loaded = self._is_llama_server_healthy() or (self.model_instance is not None)
-        state = "ready" if is_loaded else self.engine_state
+        srv_state = self._check_llama_server_state()
+        is_loaded = (srv_state == "ready") or (self.model_instance is not None)
+        if srv_state == "ready":
+            state = "ready"
+        elif srv_state == "loading" or self.engine_state == "loading":
+            state = "loading"
+        else:
+            state = self.engine_state
 
         return {
             "active_model": self.active_model or "Sin modelo GGUF",
@@ -640,5 +800,6 @@ class InferenceEngine:
             "kv_mode": self.kv_mode,
             "kv_location": self.kv_location,
             "context_mem_gb": round((self.n_ctx / 32768) * 2.4, 1),
-            "is_loaded": is_loaded
+            "is_loaded": is_loaded,
+            "has_runtime": Boolean_runtime := (self._find_llama_server_binary() is not None)
         }

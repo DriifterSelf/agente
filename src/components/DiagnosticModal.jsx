@@ -9,6 +9,8 @@ export default function DiagnosticModal({ isOpen, onClose, systemStatus, isBacke
   const [isRestarting, setIsRestarting] = useState(false);
   const [isInstallingWinget, setIsInstallingWinget] = useState(false);
   const [isDownloadingPortable, setIsDownloadingPortable] = useState(false);
+  const [isDownloadingLlamaRuntime, setIsDownloadingLlamaRuntime] = useState(false);
+  const [llamaRuntimeMsg, setLlamaRuntimeMsg] = useState('');
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'errors' | 'backend'
 
   // Capture frontend console errors
@@ -149,6 +151,27 @@ export default function DiagnosticModal({ isOpen, onClose, systemStatus, isBacke
     }
   };
 
+  const handleDownloadLlamaRuntime = async () => {
+    setIsDownloadingLlamaRuntime(true);
+    setLlamaRuntimeMsg('Descargando llama-server.exe + DLLs GPU (~22 MB)...');
+    try {
+      const res = await fetch(`${API_BASE}/api/system/download-runtime`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        setLlamaRuntimeMsg(`Instalado: ${data.runtime_path} (${data.engine_state})`);
+      } else {
+        setLlamaRuntimeMsg(`Error: ${data.detail || 'No se pudo descargar llama-server.exe'}`);
+      }
+    } catch (err) {
+      setLlamaRuntimeMsg(`Error de conexión con backend: ${err.message}`);
+    } finally {
+      setIsDownloadingLlamaRuntime(false);
+    }
+  };
+
   const handleCopyLogs = () => {
     const text = logs.map((l) => `[${l.time}] [${l.type.toUpperCase()}] ${l.text}`).join('\n');
     const fullReport = `=== AGENTE DIAGNOSTIC REPORT ===
@@ -158,6 +181,7 @@ isElectron: ${isElectron}
 API_BASE: ${API_BASE}
 Backend Conectado: ${isBackendConnected}
 Python Detectado: ${backendInfo?.pythonPath || 'No configurado'}
+Llama.cpp Runtime: ${systemStatus?.has_runtime ? 'Instalado' : 'Faltante'}
 GPU: ${systemStatus?.gpu_name || 'N/A'} (${systemStatus?.gpu_backend || 'N/A'})
 VRAM: ${systemStatus?.gpu_vram || 'N/A'}
 RAM: ${systemStatus?.ram_total_gb || 'N/A'} GB
@@ -258,6 +282,31 @@ ${text}`;
                 <span>Examinar...</span>
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Llama.cpp Runtime Resolution Banner when Python is connected but llama-server.exe is missing or not started */}
+        {isBackendConnected && (systemStatus?.has_runtime === false || systemStatus?.engine_state === 'missing_model' || llamaRuntimeMsg) && (
+          <div className="bg-indigo-950/40 border-b border-indigo-500/30 px-5 py-2.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start space-x-2.5">
+              <DownloadCloud size={16} className="text-indigo-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold text-indigo-200">
+                  Motor de Inferencia Local GGUF (`llama-server.exe` + DLLs GPU)
+                </div>
+                <div className="text-indigo-300/80 text-[11px] mt-0.5">
+                  {llamaRuntimeMsg || 'Si ya descargaste el modelo GGUF pero falta el binario llama-server.exe en ~/AgenteStudio/runtime, descárgalo e inicia el motor con 1 clic:'}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={handleDownloadLlamaRuntime}
+              disabled={isDownloadingLlamaRuntime}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium transition shadow-sm text-xs flex-shrink-0"
+            >
+              <DownloadCloud size={13} className={isDownloadingLlamaRuntime ? 'animate-bounce' : ''} />
+              <span>{isDownloadingLlamaRuntime ? 'Descargando e iniciando...' : 'Instalar Binarios Llama.cpp (GPU)'}</span>
+            </button>
           </div>
         )}
 

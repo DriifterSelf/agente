@@ -48,7 +48,20 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 default_proj = os.path.join(PROJECTS_DIR, "Mi Primer Proyecto")
 os.makedirs(default_proj, exist_ok=True)
 
-app = FastAPI(title="Agente Desktop AI Backend")
+from contextlib import asynccontextmanager
+
+engine = InferenceEngine(models_dir=MODELS_DIR) if InferenceEngine else None
+agent = AutonomousAgent(engine) if AutonomousAgent else None
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    if engine:
+        engine.auto_start()
+    yield
+    if engine:
+        engine.stop()
+
+app = FastAPI(title="Agente Desktop AI Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,19 +70,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-engine = InferenceEngine(models_dir=MODELS_DIR) if InferenceEngine else None
-agent = AutonomousAgent(engine) if AutonomousAgent else None
-
-@app.on_event("startup")
-def on_startup():
-    if engine:
-        engine.auto_start()
-
-@app.on_event("shutdown")
-def on_shutdown():
-    if engine:
-        engine.stop()
 
 def _safe_project_path(name: str) -> str:
     if not name or not isinstance(name, str):
@@ -387,6 +387,19 @@ def open_models_folder():
     if SystemTools:
         return SystemTools.open_in_windows(MODELS_DIR)
     return {"status": "ok", "path": MODELS_DIR}
+
+@app.post("/api/system/download-runtime")
+def download_llama_runtime():
+    if not engine:
+        return {"status": "error", "message": "Motor no inicializado"}
+    bin_path = engine.ensure_runtime()
+    if bin_path:
+        models = engine.list_available_models()
+        if models:
+            import threading
+            threading.Thread(target=engine.load_model, args=(models[0]["filename"],), daemon=True).start()
+        return {"status": "success", "binary": bin_path}
+    return {"status": "error", "message": "No se pudo descargar llama-server.exe"}
 
 
 @app.post("/api/chat")
