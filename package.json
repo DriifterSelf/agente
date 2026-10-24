@@ -76,6 +76,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {

@@ -184,7 +184,7 @@ function getRealHardwareInfo(): HardwareInfo {
 let currentContextConfig = {
   n_ctx: 32768,
   kv_mode: 'auto',
-  active_model: 'Agente-Multimodal-v1.gguf'
+  active_model: 'Qwen3-30B-A3B-Q4_K_M.gguf'
 };
 
 const app = express();
@@ -286,7 +286,7 @@ function getProjectsList() {
     .map(entry => {
       const pPath = path.join(PROJECTS_DIR, entry.name);
       const files = fs.readdirSync(pPath);
-      const fileCount = files.filter(f => !f.startsWith('.')).length;
+      const fileCount = files.filter(f => !f.startsWith('.') && f !== 'conversations.json').length;
       const stats = fs.statSync(pPath);
       return {
         name: entry.name,
@@ -426,8 +426,17 @@ app.post('/api/projects/:name/chats', (req: Request, res: Response) => {
   const targetDir = path.join(PROJECTS_DIR, cleanName);
   if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
   const chatFile = path.join(targetDir, 'conversations.json');
-  fs.writeFileSync(chatFile, JSON.stringify(req.body.messages || [], null, 2), 'utf-8');
-  res.json({ status: 'saved', count: (req.body.messages || []).length });
+  const payload = req.body.conversations !== undefined
+    ? {
+        conversations: req.body.conversations,
+        active_conversation_id: req.body.active_conversation_id || null
+      }
+    : (req.body.messages || []);
+  fs.writeFileSync(chatFile, JSON.stringify(payload, null, 2), 'utf-8');
+  const count = Array.isArray(req.body.conversations)
+    ? req.body.conversations.length
+    : (req.body.messages || []).length;
+  res.json({ status: 'saved', count });
 });
 
 // 14. Workspace open external repo
@@ -444,14 +453,50 @@ app.post('/api/workspace/open-repo', (req: Request, res: Response) => {
 // 15. Models listing & loading
 app.get('/api/models', (_req: Request, res: Response) => {
   res.json([
-    { filename: 'Agente-Multimodal-v1.gguf', path: 'models/Agente-Multimodal-v1.gguf', size_gb: 4.8, type: 'gguf' },
-    { filename: 'Qwen2.5-Coder-7B-Instruct.gguf', path: 'models/Qwen2.5-Coder-7B.gguf', size_gb: 5.2, type: 'gguf' }
+    {
+      filename: 'Qwen3-30B-A3B-Q4_K_M.gguf',
+      path: 'models/Qwen3-30B-A3B-Q4_K_M.gguf',
+      size_gb: 17.3,
+      installed: true,
+      active: currentContextConfig.active_model === 'Qwen3-30B-A3B-Q4_K_M.gguf',
+      badge: 'MoE • 64GB DDR5 + GPU',
+      desc: 'Arquitectura Mixture-of-Experts (30B totales, 3B activos) • Máximo razonamiento',
+      type: 'gguf'
+    },
+    {
+      filename: 'Qwen3-8B-Q4_K_M.gguf',
+      path: 'models/Qwen3-8B-Q4_K_M.gguf',
+      size_gb: 4.68,
+      installed: true,
+      active: currentContextConfig.active_model === 'Qwen3-8B-Q4_K_M.gguf',
+      badge: '100% VRAM • Ultrarrápido',
+      desc: '100% en los 8GB VRAM de tu RTX 4070 • Respuesta instantánea',
+      type: 'gguf'
+    }
   ]);
 });
 
 app.post('/api/models/load', (req: Request, res: Response) => {
-  if (req.body?.filename) currentContextConfig.active_model = req.body.filename;
-  res.json({ status: 'ready', message: `Modelo ${currentContextConfig.active_model} listo`, n_ctx: currentContextConfig.n_ctx });
+  if (req.body?.filename) {
+    currentContextConfig.active_model = req.body.filename;
+    if (req.body.filename.toLowerCase().includes('30b') && currentContextConfig.kv_mode === 'auto') {
+      currentContextConfig.kv_mode = 'ram';
+    }
+  }
+  res.json({
+    status: 'loaded',
+    model: currentContextConfig.active_model,
+    message: `Modelo ${currentContextConfig.active_model} activo`,
+    n_ctx: currentContextConfig.n_ctx
+  });
+});
+
+app.post('/api/models/download', (req: Request, res: Response) => {
+  res.json({ status: 'started', filename: req.body?.filename });
+});
+
+app.post('/api/models/open-folder', (_req: Request, res: Response) => {
+  res.json({ status: 'ok', path: path.resolve(__dirname, 'models') });
 });
 
 // =========================================================================

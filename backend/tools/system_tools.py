@@ -13,7 +13,7 @@ class SystemTools:
             # Skip hidden folders
             dirs[:] = [d for d in dirs if not d.startswith('.')]
             for f in files:
-                if f.startswith('.'):
+                if f.startswith('.') or f == 'conversations.json':
                     continue
                 full_p = os.path.join(root, f)
                 rel_p = os.path.relpath(full_p, directory)

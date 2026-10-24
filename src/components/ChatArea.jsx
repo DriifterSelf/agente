@@ -22,7 +22,10 @@ import {
   Check,
   Video,
   BarChart3,
-  Code
+  Code,
+  Plus,
+  MessageSquare,
+  Edit2
 } from 'lucide-react';
 
 export default function ChatArea({
@@ -33,13 +36,21 @@ export default function ChatArea({
   currentStreamContent,
   activeActions,
   activeProject,
-  onUploadFile
+  onUploadFile,
+  conversations = [],
+  activeConversationId = '',
+  onSelectConversation,
+  onCreateConversation,
+  onRenameConversation,
+  onDeleteConversation
 }) {
   const [input, setInput] = useState('');
   const [expandedActions, setExpandedActions] = useState({});
   const [attachments, setAttachments] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState(null);
+  const [editingTabId, setEditingTabId] = useState(null);
+  const [editingTabTitle, setEditingTabTitle] = useState('');
   
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
@@ -241,10 +252,113 @@ export default function ChatArea({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`flex-1 flex flex-col h-full bg-[#0B0F17] relative transition-colors ${
+      className={`flex-1 flex flex-col h-full bg-[#0B0F17] relative transition-colors overflow-hidden ${
         isDragging ? 'border-2 border-dashed border-blue-500/80 bg-blue-950/10' : ''
       }`}
     >
+      {/* Multi-Conversation Tabs Header Bar */}
+      {activeProject && (
+        <div className="h-9 bg-[#080C14] border-b border-border/80 flex items-center justify-between px-2.5 select-none flex-shrink-0 gap-2">
+          <div className="flex items-center space-x-1 overflow-x-auto no-scrollbar py-1 min-w-0 flex-1">
+            {conversations.map((conv) => {
+              const isTabActive = conv.id === activeConversationId;
+              const isEditingTab = editingTabId === conv.id;
+              const count = Array.isArray(conv.messages) ? conv.messages.length : 0;
+
+              return (
+                <div
+                  key={conv.id}
+                  onClick={() => !isEditingTab && onSelectConversation && onSelectConversation(conv.id)}
+                  onDoubleClick={() => {
+                    setEditingTabId(conv.id);
+                    setEditingTabTitle(conv.title);
+                  }}
+                  className={`group flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer transition flex-shrink-0 max-w-[210px] border ${
+                    isTabActive
+                      ? 'bg-blue-600/15 text-blue-300 border-blue-500/40 font-medium shadow-sm'
+                      : 'bg-surface/40 hover:bg-surface text-slate-400 hover:text-slate-200 border-border/50'
+                  }`}
+                  title={`${conv.title} (${count} mensajes) • Doble clic para renombrar`}
+                >
+                  <MessageSquare
+                    size={11}
+                    className={isTabActive ? 'text-blue-400 flex-shrink-0' : 'text-slate-500 flex-shrink-0'}
+                  />
+                  {isEditingTab ? (
+                    <input
+                      type="text"
+                      autoFocus
+                      maxLength={60}
+                      value={editingTabTitle}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setEditingTabTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          if (editingTabTitle.trim() && onRenameConversation) {
+                            onRenameConversation(conv.id, editingTabTitle.trim());
+                          }
+                          setEditingTabId(null);
+                        } else if (e.key === 'Escape') {
+                          setEditingTabId(null);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (editingTabTitle.trim() && onRenameConversation) {
+                          onRenameConversation(conv.id, editingTabTitle.trim());
+                        }
+                        setEditingTabId(null);
+                      }}
+                      className="w-28 bg-background border border-blue-500 rounded px-1 py-0 text-xs text-slate-100 focus:outline-none"
+                    />
+                  ) : (
+                    <span className="truncate">{conv.title}</span>
+                  )}
+
+                  {!isEditingTab && (
+                    <div className="flex items-center space-x-0.5 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingTabId(conv.id);
+                          setEditingTabTitle(conv.title);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-surfaceHover text-slate-400 hover:text-blue-300 transition"
+                        title="Renombrar conversación"
+                      >
+                        <Edit2 size={10} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteConversation && onDeleteConversation(conv.id);
+                        }}
+                        className="opacity-60 group-hover:opacity-100 p-0.5 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
+                        title="Cerrar / Eliminar conversación"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            disabled={isStreaming}
+            onClick={() => onCreateConversation && onCreateConversation()}
+            className="flex items-center space-x-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 px-2.5 py-1 rounded-md text-xs font-medium transition flex-shrink-0 disabled:opacity-40"
+            title="Iniciar una nueva conversación en este proyecto"
+          >
+            <Plus size={12} />
+            <span className="hidden sm:inline">Nueva conversación</span>
+          </button>
+        </div>
+      )}
+
       {/* Hidden File Input */}
       <input
         type="file"

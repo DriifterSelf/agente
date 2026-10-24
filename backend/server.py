@@ -167,44 +167,7 @@ def get_system_status():
     gpu_name = "NVIDIA GeForce RTX 4070 Laptop GPU"
     gpu_backend = "CUDA 12.x"
     gpu_vram_str = "8.0 GB"
-    active_model = "Agente-Multimodal-v1.gguf"
-
-    # Try detecting real hardware
-    try:
-        # 1. nvidia-smi check
-        nvidia_paths = ["nvidia-smi", r"C:\Windows\System32\nvidia-smi.exe", r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"]
-        for np in nvidia_paths:
-            try:
-                res = subprocess.run([np, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=1.5)
-                if res.returncode == 0 and res.stdout.strip():
-                    parts = [p.strip() for p in res.stdout.strip().splitlines()[0].split(",")]
-                    gpu_name = parts[0]
-                    gpu_backend = "CUDA 12.x"
-                    if len(parts) > 1:
-                        gpu_vram_str = f"{round(float(parts[1]) / 1024, 1)} GB"
-                    break
-            except Exception:
-                continue
-
-        # 2. Windows WMI if nvidia-smi didn't return
-        if gpu_name == "NVIDIA GeForce RTX 4070 Laptop GPU" and sys.platform == "win32":
-            try:
-                res = subprocess.run(["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"], capture_output=True, text=True, timeout=2.5)
-                if res.returncode == 0 and res.stdout.strip():
-                    lines = [l.strip() for l in res.stdout.strip().splitlines() if l.strip()]
-                    dedicated = next((l for l in lines if any(k in l.lower() for k in ["nvidia", "geforce", "rtx", "gtx", "radeon", "arc"])), None)
-                    if dedicated:
-                        gpu_name = dedicated
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # Strictly enforce CUDA 12.x for NVIDIA, Vulkan for AMD/Intel
-    if any(k in gpu_name.lower() for k in ["radeon", "amd", "arc", "intel"]):
-        gpu_backend = "Vulkan"
-    else:
-        gpu_backend = "CUDA 12.x"
+    active_model = "Sin modelo GGUF"
 
     eng_status = {}
     if engine:
@@ -212,19 +175,26 @@ def get_system_status():
             eng_status = engine.get_status()
             if eng_status.get("active_model"):
                 active_model = eng_status["active_model"]
+            if eng_status.get("gpu_name"):
+                gpu_name = eng_status["gpu_name"]
+            if eng_status.get("gpu_backend"):
+                gpu_backend = eng_status["gpu_backend"]
+            if eng_status.get("gpu_vram_gb"):
+                gpu_vram_str = f"{eng_status['gpu_vram_gb']} GB"
         except Exception:
             pass
 
     ctx_mem = eng_status.get("context_mem_gb") or 2.4
     n_ctx_val = getattr(engine, "n_ctx", 32768) if engine else 32768
+    kv_loc = eng_status.get("kv_location", "gpu")
 
     return {
         "cpu_usage": cpu_percent,
         "ram_total_gb": total_ram_gb,
         "ram_available_gb": avail_ram_gb,
         "ram_percent": ram_percent,
-        "engine_state": "ready",
-        "engine_message": "Motor de Inferencia listo",
+        "engine_state": eng_status.get("engine_state", "ready"),
+        "engine_message": eng_status.get("engine_message", "Motor de Inferencia listo"),
         "active_model": active_model,
         "selected_model": active_model,
         "gpu_name": gpu_name,
@@ -234,10 +204,10 @@ def get_system_status():
         "n_ctx_k": round(n_ctx_val / 1024),
         "n_ctx_max": 40960,
         "kv_mode": getattr(engine, "kv_mode", "auto") if engine else "auto",
-        "kv_location": "gpu",
+        "kv_location": kv_loc,
         "context_mem_gb": ctx_mem,
         "context_ram_gb": ctx_mem,
-        "use_ram_for_kv": False
+        "use_ram_for_kv": kv_loc == "ram"
     }
 
 @app.get("/api/system/git-info")
@@ -279,7 +249,10 @@ def list_projects():
     if os.path.exists(PROJECTS_DIR):
         for entry in os.scandir(PROJECTS_DIR):
             if entry.is_dir() and not entry.name.startswith("."):
-                file_count = len([f for f in os.scandir(entry.path) if f.is_file()])
+                file_count = len([
+                    f for f in os.scandir(entry.path)
+                    if f.is_file() and not f.name.startswith(".") and f.name != "conversations.json"
+                ])
                 projects.append({
                     "name": entry.name,
                     "path": entry.path,
@@ -342,13 +315,29 @@ def open_file_in_windows(req: OpenFileRequest):
 
 @app.get("/api/models")
 def list_models():
-    return engine.list_available_models() if engine else []
+    if engine:
+        return engine.list_catalog_models()
+    return []
 
 @app.post("/api/models/load")
 def load_model(req: LoadModelRequest):
     if engine:
         return engine.load_model(req.filename, n_gpu_layers=req.gpu_layers, n_ctx=req.n_ctx)
     return {"status": "ok"}
+
+@app.post("/api/models/download")
+def download_model(req: LoadModelRequest):
+    if engine:
+        return engine.download_model_native(req.filename)
+    return {"status": "error", "message": "Motor no disponible"}
+
+@app.post("/api/models/open-folder")
+def open_models_folder():
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    if SystemTools:
+        return SystemTools.open_in_windows(MODELS_DIR)
+    return {"status": "ok", "path": MODELS_DIR}
+
 
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
@@ -386,7 +375,9 @@ def open_local_repository(req: OpenRepoRequest):
     return {"name": repo_name, "path": repo_path, "status": "connected"}
 
 class SaveChatRequest(BaseModel):
-    messages: List[Dict[str, Any]]
+    messages: Optional[List[Dict[str, Any]]] = None
+    conversations: Optional[List[Dict[str, Any]]] = None
+    active_conversation_id: Optional[str] = None
 
 @app.get("/api/projects/{name}/chats")
 def get_project_chats(name: str):
@@ -405,9 +396,20 @@ def save_project_chats(name: str, req: SaveChatRequest):
     target = _safe_project_path(name)
     os.makedirs(target, exist_ok=True)
     chat_file = os.path.join(target, "conversations.json")
+
+    if req.conversations is not None:
+        payload: Any = {
+            "conversations": req.conversations,
+            "active_conversation_id": req.active_conversation_id
+        }
+        count = len(req.conversations)
+    else:
+        payload = req.messages or []
+        count = len(payload)
+
     with open(chat_file, "w", encoding="utf-8") as f:
-        json.dump(req.messages, f, ensure_ascii=False, indent=2)
-    return {"status": "saved", "count": len(req.messages)}
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return {"status": "saved", "count": count}
 
 if __name__ == "__main__":
     import uvicorn

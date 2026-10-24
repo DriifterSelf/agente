@@ -1,6 +1,7 @@
 const { spawn, execSync } = require('child_process');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 
 class BackendManager {
@@ -15,7 +16,11 @@ class BackendManager {
 
     // Config path for user custom python path
     try {
-      const appData = process.env.APPDATA || (process.platform === 'win32' && process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'AppData', 'Roaming') : null);
+      const appData =
+        process.env.APPDATA ||
+        (process.platform === 'win32' && process.env.USERPROFILE
+          ? path.join(process.env.USERPROFILE, 'AppData', 'Roaming')
+          : null);
       this.configDir = appData ? path.join(appData, 'AgenteStudio') : path.join(this.basePath, '.config');
       this.configFile = path.join(this.configDir, 'python_config.json');
       if (!fs.existsSync(this.configDir)) {
@@ -83,6 +88,139 @@ class BackendManager {
     } catch (e) {}
   }
 
+  downloadFileHelper(url, dest) {
+    return new Promise((resolve, reject) => {
+      const file = fs.createWriteStream(dest);
+      const req = https.get(url, { headers: { 'User-Agent': 'AgenteStudio/1.0' } }, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
+          file.close();
+          return this.downloadFileHelper(res.headers.location, dest).then(resolve).catch(reject);
+        }
+        if (res.statusCode !== 200) {
+          file.close();
+          return reject(new Error(`HTTP ${res.statusCode}`));
+        }
+        res.pipe(file);
+        file.on('finish', () => {
+          file.close(() => resolve(true));
+        });
+      });
+      req.on('error', (err) => {
+        fs.unlink(dest, () => {});
+        reject(err);
+      });
+    });
+  }
+
+  // Ensure python311._pth has site-packages and basePath enabled
+  configurePthFile(pythonExePath) {
+    try {
+      const pyDir = path.dirname(pythonExePath);
+      const pthFiles = fs.readdirSync(pyDir).filter((f) => f.endsWith('._pth'));
+      for (const pthName of pthFiles) {
+        const pthPath = path.join(pyDir, pthName);
+        let content = fs.readFileSync(pthPath, 'utf-8');
+        content = content.replace(/#import site/g, 'import site');
+        if (!content.includes('import site')) content += '\nimport site\n';
+        if (!content.includes('Lib\\site-packages')) content += 'Lib\\site-packages\n';
+        if (!content.includes(this.basePath)) content += `${this.basePath}\n`;
+        fs.writeFileSync(pthPath, content, 'utf-8');
+      }
+      const sitePkg = path.join(pyDir, 'Lib', 'site-packages');
+      if (!fs.existsSync(sitePkg)) {
+        fs.mkdirSync(sitePkg, { recursive: true });
+      }
+    } catch (e) {}
+  }
+
+  // Automatically verify and install pip + backend/requirements.txt if missing
+  async ensurePythonDependencies(pythonCmd) {
+    const { cmd, args } = pythonCmd;
+    const reqFile = path.join(this.basePath, 'backend', 'requirements.txt');
+    if (!fs.existsSync(reqFile)) return true;
+
+    if (fs.existsSync(cmd)) {
+      this.configurePthFile(cmd);
+    }
+
+    // 1. Check if fastapi and uvicorn are already importable
+    try {
+      const checkArgs = [...args, '-c', 'import fastapi, uvicorn, pydantic, requests; print("OK")'];
+      const out = execSync(`"${cmd}" ${checkArgs.map((a) => `"${a}"`).join(' ')}`, {
+        cwd: this.basePath,
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['ignore', 'pipe', 'pipe']
+      }).trim();
+      if (out.includes('OK')) {
+        return true;
+      }
+    } catch (e) {
+      this.addLog('system', 'Detectadas librerías de backend pendientes de instalar en este entorno Python. Preparando instalación automática...');
+    }
+
+    // 2. Check if pip is installed; if not, bootstrap get-pip.py
+    let hasPip = false;
+    try {
+      execSync(`"${cmd}" ${args.join(' ')} -m pip --version`, {
+        cwd: this.basePath,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 5000
+      });
+      hasPip = true;
+    } catch (e) {
+      hasPip = false;
+    }
+
+    if (!hasPip) {
+      try {
+        this.addLog('system', 'Descargando gestor de paquetes oficial (get-pip.py)...');
+        const getPipPath = path.join(this.configDir || this.basePath, 'get-pip.py');
+        await this.downloadFileHelper('https://bootstrap.pypa.io/get-pip.py', getPipPath);
+        this.addLog('system', 'Activando pip en el entorno Python...');
+        await new Promise((resolve) => {
+          const proc = spawn(cmd, [...args, getPipPath, '--no-warn-script-location'], {
+            cwd: this.basePath,
+            stdio: ['ignore', 'pipe', 'pipe']
+          });
+          proc.stdout?.on('data', (d) => this.addLog('stdout', `[pip-setup] ${d.toString()}`));
+          proc.stderr?.on('data', (d) => this.addLog('stderr', `[pip-setup] ${d.toString()}`));
+          proc.on('close', () => resolve());
+          proc.on('error', () => resolve());
+        });
+        try {
+          fs.unlinkSync(getPipPath);
+        } catch (e) {}
+      } catch (err) {
+        this.addLog('stderr', `Error al inicializar pip: ${err.message}`);
+      }
+    }
+
+    // 3. Install backend/requirements.txt
+    this.addLog('system', 'Instalando paquetes del proyecto (FastAPI, Uvicorn, OpenPyXL, Docx, PPTX, Requests)...');
+    return new Promise((resolve) => {
+      const pipProc = spawn(cmd, [...args, '-m', 'pip', 'install', '-r', reqFile, '--no-warn-script-location'], {
+        cwd: this.basePath,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      pipProc.stdout?.on('data', (d) => this.addLog('stdout', `[pip] ${d.toString()}`));
+      pipProc.stderr?.on('data', (d) => this.addLog('stderr', `[pip] ${d.toString()}`));
+      pipProc.on('close', (code) => {
+        if (code === 0) {
+          this.addLog('system', '¡Librerías del backend instaladas correctamente!');
+          resolve(true);
+        } else {
+          this.addLog('stderr', `Instalación de pip finalizó con código ${code}`);
+          resolve(false);
+        }
+      });
+      pipProc.on('error', (err) => {
+        this.addLog('stderr', `Error ejecutando pip: ${err.message}`);
+        resolve(false);
+      });
+    });
+  }
+
   // Detect genuine working Python executable on Windows / Linux / macOS
   findPythonCommand() {
     // 1. Saved custom python from user
@@ -97,19 +235,28 @@ class BackendManager {
       return { cmd: process.env.PYTHON, args: [] };
     }
 
-    // 3. Embedded Python bundled inside the application distribution or user data
-    const bundledCandidates = [
-      path.join(this.basePath, 'python', 'python.exe'),
-      path.join(this.basePath, 'python-embed', 'python.exe'),
+    // 3. Tuned Local Inference Runtime & Bundled Portable Python
+    const userProfile = process.env.USERPROFILE || '';
+    const agenteStudioHome = userProfile ? path.join(userProfile, 'AgenteStudio') : null;
+
+    const tunedCandidates = [
       path.join(this.basePath, 'runtime', 'python.exe'),
-      path.join(this.basePath, '..', 'python', 'python.exe'),
+      path.join(this.basePath, 'runtime', 'Scripts', 'python.exe'),
       path.join(this.basePath, '..', 'runtime', 'python.exe'),
+      path.join(this.basePath, '..', 'runtime', 'Scripts', 'python.exe'),
+      path.join(this.basePath, 'venv', 'Scripts', 'python.exe'),
+      path.join(this.basePath, '..', 'venv', 'Scripts', 'python.exe'),
+      path.join(this.basePath, 'python', 'python.exe'),
+      path.join(this.basePath, '..', 'python', 'python.exe'),
+      agenteStudioHome ? path.join(agenteStudioHome, 'runtime', 'python.exe') : null,
+      agenteStudioHome ? path.join(agenteStudioHome, 'python', 'python.exe') : null,
+      this.configDir ? path.join(this.configDir, 'runtime', 'python.exe') : null,
       this.configDir ? path.join(this.configDir, 'python', 'python.exe') : null
     ].filter(Boolean);
 
-    for (const p of bundledCandidates) {
+    for (const p of tunedCandidates) {
       if (fs.existsSync(p)) {
-        this.addLog('system', `Encontrado Python embebido en la aplicación: ${p}`);
+        this.addLog('system', `[Runtime Integrado] Detectado entorno Python del proyecto en: ${p}`);
         return { cmd: p, args: [] };
       }
     }
@@ -124,7 +271,7 @@ class BackendManager {
         }).trim();
         if (pyVer && !pyVer.toLowerCase().includes('windowsapps') && fs.existsSync(pyVer)) {
           this.addLog('system', `Detectado lanzador oficial 'py' enlazado a: ${pyVer}`);
-          return { cmd: 'py', args: ['-3'] };
+          return { cmd: pyVer, args: [] };
         }
       } catch (e) {}
 
@@ -142,7 +289,6 @@ class BackendManager {
       } catch (e) {}
 
       // 6. Direct search in common Windows installations
-      const userProfile = process.env.USERPROFILE || '';
       const localAppData = process.env.LOCALAPPDATA || path.join(userProfile, 'AppData', 'Local');
       const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
       const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
@@ -185,11 +331,8 @@ class BackendManager {
         if (testOut === '3') {
           return { cmd: 'python', args: [] };
         }
-      } catch (e) {
-        // Ignored: it's the 9009 Windows Store fake alias or not found
-      }
+      } catch (e) {}
 
-      // No valid Python found on Windows
       return null;
     }
 
@@ -229,7 +372,7 @@ class BackendManager {
     });
   }
 
-  spawnBackend(onReady) {
+  async spawnBackend(onReady) {
     try {
       const serverScript = path.join(this.basePath, 'backend', 'server.py');
       if (!fs.existsSync(serverScript)) {
@@ -244,14 +387,25 @@ class BackendManager {
 
       if (!pythonCmd) {
         this.status = 'no_python';
-        this.errorMessage = 'No se encontró un entorno de Python 3 válido en el sistema (el comando "python" fue interceptado por el alias de Windows Store).';
-        this.addLog('stderr', 'AVISO: Windows interceptó el comando con el alias de Microsoft Store (código 9009). No hay Python 3 accesible.');
-        this.addLog('system', 'Solución: Puedes hacer clic en "Instalar Python con WinGet" o "Seleccionar ruta de python.exe" en la Consola DevTools.');
+        this.errorMessage =
+          'No se encontró un entorno de Python 3 válido en el sistema (el comando "python" fue interceptado por el alias de Windows Store).';
+        this.addLog(
+          'stderr',
+          'AVISO: Windows interceptó el comando con el alias de Microsoft Store (código 9009). No hay Python 3 accesible.'
+        );
+        this.addLog(
+          'system',
+          'Solución: Haz clic en "Descargar Python 3.11 Portable (Integrado)" en la Consola DevTools para descargar e instalar automáticamente Python + todas las librerías del proyecto.'
+        );
         onReady(false);
         return;
       }
 
       this.resolvedPython = pythonCmd;
+
+      // Ensure pip and backend/requirements.txt are installed in this Python before running server.py!
+      await this.ensurePythonDependencies(pythonCmd);
+
       const { cmd, args } = pythonCmd;
       const fullCmdString = `${cmd} ${args.concat(serverScript).join(' ')}`;
       this.addLog('system', `Ejecutando: ${fullCmdString}`);
@@ -260,6 +414,7 @@ class BackendManager {
         cwd: this.basePath,
         env: {
           ...process.env,
+          PYTHONPATH: this.basePath,
           PYTHONUNBUFFERED: '1',
           PYTHONIOENCODING: 'utf-8'
         },
@@ -281,7 +436,11 @@ class BackendManager {
       this.process.stdout?.on('data', (data) => {
         const str = data.toString();
         this.addLog('stdout', str);
-        if (str.includes('Uvicorn running') || str.includes('Application startup complete') || str.includes('127.0.0.1:8765')) {
+        if (
+          str.includes('Uvicorn running') ||
+          str.includes('Application startup complete') ||
+          str.includes('127.0.0.1:8765')
+        ) {
           this.status = 'running';
           if (!resolved) {
             resolved = true;
@@ -313,24 +472,26 @@ class BackendManager {
         }
       });
 
-      // Fallback timeout: wait up to 10 seconds for backend to start
+      // Fallback timeout: wait up to 12 seconds for backend to start
       setTimeout(() => {
         if (!resolved) {
           resolved = true;
-          http.get('http://127.0.0.1:8765/api/health', (res) => {
-            if (res.statusCode === 200) {
-              this.status = 'running';
-              this.addLog('system', 'Backend respondiendo con éxito.');
-              onReady(true);
-            } else {
+          http
+            .get('http://127.0.0.1:8765/api/health', (res) => {
+              if (res.statusCode === 200) {
+                this.status = 'running';
+                this.addLog('system', 'Backend respondiendo con éxito.');
+                onReady(true);
+              } else {
+                onReady(false);
+              }
+            })
+            .on('error', () => {
+              this.addLog('system', 'Esperando que el backend FastAPI responda...');
               onReady(false);
-            }
-          }).on('error', () => {
-            this.addLog('system', 'Esperando que el backend FastAPI responda...');
-            onReady(false);
-          });
+            });
         }
-      }, 9000);
+      }, 12000);
     } catch (e) {
       this.status = 'failed';
       this.errorMessage = e.message;
@@ -357,17 +518,14 @@ class BackendManager {
     this.addLog('system', 'Iniciando instalación automática de Python 3.11 mediante Windows Package Manager (WinGet)...');
     return new Promise((resolve) => {
       try {
-        const winget = spawn('winget', [
-          'install',
-          '-e',
-          '--id',
-          'Python.Python.3.11',
-          '--accept-package-agreements',
-          '--accept-source-agreements'
-        ], {
-          shell: true,
-          stdio: ['ignore', 'pipe', 'pipe']
-        });
+        const winget = spawn(
+          'winget',
+          ['install', '-e', '--id', 'Python.Python.3.11', '--accept-package-agreements', '--accept-source-agreements'],
+          {
+            shell: true,
+            stdio: ['ignore', 'pipe', 'pipe']
+          }
+        );
 
         winget.stdout?.on('data', (data) => {
           this.addLog('stdout', `[WinGet] ${data.toString()}`);
@@ -379,8 +537,7 @@ class BackendManager {
 
         winget.on('close', async (code) => {
           if (code === 0) {
-            this.addLog('system', '¡Python 3.11 instalado con éxito! Reiniciando backend...');
-            // Wait 2 seconds for PATH refresh
+            this.addLog('system', '¡Python 3.11 instalado con éxito! Instalando dependencias y reiniciando backend...');
             setTimeout(async () => {
               this.stop();
               const restarted = await this.start();
@@ -403,9 +560,9 @@ class BackendManager {
     });
   }
 
-  // Download official portable Python 3.11 embeddable archive directly
+  // Download official portable Python 3.11 embeddable archive + pip + requirements.txt
   async downloadPortablePython() {
-    this.addLog('system', 'Iniciando descarga directa de Python 3.11 Portable Embebido (64-bit)...');
+    this.addLog('system', 'Iniciando descarga de Python 3.11 Portable + Librerías del Proyecto...');
     const targetDir = path.join(this.configDir, 'python');
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
@@ -413,65 +570,40 @@ class BackendManager {
     const zipPath = path.join(this.configDir, 'python-3.11.9-embed-amd64.zip');
     const url = 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip';
 
-    return new Promise((resolve) => {
-      const https = require('https');
-      const file = fs.createWriteStream(zipPath);
+    try {
+      const pythonExe = path.join(targetDir, 'python.exe');
+      if (!fs.existsSync(pythonExe)) {
+        await this.downloadFileHelper(url, zipPath);
+        this.addLog('system', 'Descarga de Python Portable completada (~10 MB). Extrayendo...');
+        try {
+          execSync(`tar -xf "${zipPath}" -C "${targetDir}"`, { timeout: 30000 });
+        } catch (e) {
+          execSync(
+            `powershell -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${targetDir}' -Force"`,
+            { timeout: 30000 }
+          );
+        }
+        try {
+          fs.unlinkSync(zipPath);
+        } catch (e) {}
+      }
 
-      const doDownload = (downloadUrl) => {
-        https.get(downloadUrl, (res) => {
-          if (res.statusCode === 301 || res.statusCode === 302) {
-            return doDownload(res.headers.location);
-          }
-          if (res.statusCode !== 200) {
-            this.addLog('stderr', `Error en descarga de Python: HTTP ${res.statusCode}`);
-            return resolve({ success: false, error: `HTTP ${res.statusCode}` });
-          }
+      if (!fs.existsSync(pythonExe)) {
+        return { success: false, error: 'No se encontró python.exe tras descomprimir' };
+      }
 
-          res.pipe(file);
-          file.on('finish', () => {
-            file.close(async () => {
-              this.addLog('system', 'Descarga completada (~10 MB). Extrayendo Python Portable...');
-              try {
-                try {
-                  execSync(`tar -xf "${zipPath}" -C "${targetDir}"`, { timeout: 30000 });
-                } catch (e) {
-                  execSync(`powershell -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${targetDir}' -Force"`, { timeout: 30000 });
-                }
+      // Configure python311._pth and install pip + backend/requirements.txt
+      this.configurePthFile(pythonExe);
+      this.addLog('system', 'Configurando pip e instalando librerías del backend (FastAPI, Uvicorn, Office)...');
+      await this.ensurePythonDependencies({ cmd: pythonExe, args: [] });
 
-                try { fs.unlinkSync(zipPath); } catch (e) {}
-
-                // Enable site-packages in python311._pth
-                const pth = path.join(targetDir, 'python311._pth');
-                if (fs.existsSync(pth)) {
-                  let pthContent = fs.readFileSync(pth, 'utf-8');
-                  pthContent = pthContent.replace(/#import site/g, 'import site');
-                  if (!pthContent.includes('import site')) pthContent += '\nimport site\n';
-                  if (!pthContent.includes('Lib\\site-packages')) pthContent += 'Lib\\site-packages\n';
-                  fs.writeFileSync(pth, pthContent, 'utf-8');
-                }
-
-                const pythonExe = path.join(targetDir, 'python.exe');
-                if (fs.existsSync(pythonExe)) {
-                  this.addLog('system', `¡Python Portable integrado con éxito en: ${pythonExe}!`);
-                  await this.setCustomPython(pythonExe);
-                  resolve({ success: true, path: pythonExe });
-                } else {
-                  resolve({ success: false, error: 'No se encontró python.exe tras descomprimir' });
-                }
-              } catch (err) {
-                this.addLog('stderr', `Error al descomprimir: ${err.message}`);
-                resolve({ success: false, error: err.message });
-              }
-            });
-          });
-        }).on('error', (err) => {
-          this.addLog('stderr', `Fallo al descargar Python: ${err.message}`);
-          resolve({ success: false, error: err.message });
-        });
-      };
-
-      doDownload(url);
-    });
+      this.addLog('system', `¡Entorno Python Portable + Dependencias listo en: ${pythonExe}!`);
+      await this.setCustomPython(pythonExe);
+      return { success: true, path: pythonExe };
+    } catch (err) {
+      this.addLog('stderr', `Error preparando Python Portable: ${err.message}`);
+      return { success: false, error: err.message };
+    }
   }
 
   stop() {
