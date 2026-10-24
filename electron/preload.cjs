@@ -29,14 +29,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Window state
-  onMaximizedChange: (callback) => ipcRenderer.on('window-maximized-change', (event, isMaximized) => callback(isMaximized)),
+  onMaximizedChange: (callback) => {
+    const listener = (event, isMaximized) => callback(isMaximized);
+    ipcRenderer.on('window-maximized-change', listener);
+    return () => ipcRenderer.removeListener('window-maximized-change', listener);
+  },
   isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
 
   // OTA / Auto-update APIs
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
   restartForUpdate: () => ipcRenderer.send('restart-app-for-update'),
   onUpdateStatus: (callback) => {
-    ipcRenderer.on('update-status', (event, data) => callback(data));
+    const listener = (event, data) => callback(data);
+    ipcRenderer.on('update-status', listener);
+    return () => ipcRenderer.removeListener('update-status', listener);
   }
 });
-

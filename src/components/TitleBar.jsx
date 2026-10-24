@@ -43,6 +43,7 @@ export default function TitleBar({
   usedTokens = 0
 }) {
   const [updateStatus, setUpdateStatus] = useState(null);
+  const [appVersion, setAppVersion] = useState('1.0.1');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
   const [isMaximized, setIsMaximized] = useState(false);
@@ -180,18 +181,65 @@ export default function TitleBar({
     setIsContextOpen(false);
   };
 
+  const compareSemverClient = (vA, vB) => {
+    const parse = (s) => {
+      const m = String(s || '').match(/(\d+)\.(\d+)\.(\d+)/);
+      return m ? [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)] : [0, 0, 0];
+    };
+    const [a1, a2, a3] = parse(vA);
+    const [b1, b2, b3] = parse(vB);
+    if (a1 !== b1) return a1 - b1;
+    if (a2 !== b2) return a2 - b2;
+    return a3 - b3;
+  };
+
   useEffect(() => {
+    let unsubUpdate = null;
+    let unsubMax = null;
     if (window.electronAPI) {
+      if (window.electronAPI.getAppVersion) {
+        window.electronAPI.getAppVersion().then((ver) => {
+          if (ver) setAppVersion(ver);
+        });
+      }
       if (window.electronAPI.onUpdateStatus) {
-        window.electronAPI.onUpdateStatus((data) => setUpdateStatus(data));
+        unsubUpdate = window.electronAPI.onUpdateStatus((data) => {
+          setUpdateStatus(data);
+          if (data?.status === 'checking') {
+            setIsSyncing(true);
+            setSyncMessage('Buscando tags...');
+          } else if (data?.status === 'available') {
+            setIsSyncing(true);
+            setSyncMessage(`Descargando v${data.version}...`);
+          } else if (data?.status === 'downloading') {
+            setIsSyncing(false);
+            setSyncMessage('');
+          } else if (data?.status === 'downloaded') {
+            setIsSyncing(false);
+            setSyncMessage(`¡v${data.version} lista!`);
+          } else if (data?.status === 'tag-only') {
+            setIsSyncing(false);
+            setSyncMessage(`Nuevo tag v${data.version}`);
+          } else if (data?.status === 'not-available') {
+            setIsSyncing(false);
+            setSyncMessage('Al día');
+            setTimeout(() => setSyncMessage(''), 3000);
+          } else if (data?.status === 'error') {
+            setIsSyncing(false);
+          }
+        });
       }
       if (window.electronAPI.onMaximizedChange) {
-        window.electronAPI.onMaximizedChange((maximized) => setIsMaximized(maximized));
+        unsubMax = window.electronAPI.onMaximizedChange((maximized) => setIsMaximized(maximized));
       }
       if (window.electronAPI.isMaximized) {
         window.electronAPI.isMaximized().then((maximized) => setIsMaximized(maximized));
       }
     }
+    return () => {
+      if (typeof unsubUpdate === 'function') unsubUpdate();
+      if (typeof unsubMax === 'function') unsubMax();
+    };
   }, []);
 
   const handleMinimize = (e) => {
@@ -220,7 +268,7 @@ export default function TitleBar({
 
   const handleCheckUpdates = async () => {
     setIsSyncing(true);
-    setSyncMessage('Buscando...');
+    setSyncMessage('Buscando tags...');
     if (window.electronAPI && window.electronAPI.checkForUpdates) {
       window.electronAPI.checkForUpdates();
     }
@@ -230,15 +278,32 @@ export default function TitleBar({
       if (data.status === 'success' && data.rebuilt) {
         setSyncMessage('¡Actualizado!');
         setTimeout(() => window.location.reload(), 1500);
-      } else {
+        return;
+      }
+      if (data.latest_version && compareSemverClient(data.latest_version, appVersion) > 0) {
+        if (!window.electronAPI) {
+          setUpdateStatus({
+            status: 'tag-only',
+            version: data.latest_version,
+            rawTag: data.latest_tag || `v${data.latest_version}`
+          });
+          setSyncMessage(`Nuevo tag v${data.latest_version}`);
+        }
+        return;
+      }
+      if (!window.electronAPI) {
         setSyncMessage('Al día');
         setTimeout(() => setSyncMessage(''), 3000);
       }
     } catch (e) {
-      setSyncMessage('Al día');
-      setTimeout(() => setSyncMessage(''), 2500);
+      if (!window.electronAPI) {
+        setSyncMessage('Al día');
+        setTimeout(() => setSyncMessage(''), 2500);
+      }
     } finally {
-      setIsSyncing(false);
+      if (!window.electronAPI) {
+        setIsSyncing(false);
+      }
     }
   };
 
@@ -615,6 +680,7 @@ export default function TitleBar({
           <button
             onClick={() => window.electronAPI?.restartForUpdate()}
             className="flex items-center space-x-1 bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded font-medium hover:bg-emerald-600/30 transition animate-bounce"
+            title={`Instalar actualización v${updateStatus.version} ahora`}
           >
             <DownloadCloud size={11} />
             <span>Aplicar v{updateStatus.version}</span>
@@ -622,17 +688,35 @@ export default function TitleBar({
         ) : updateStatus?.status === 'downloading' ? (
           <div className="flex items-center space-x-1 bg-blue-600/20 border border-blue-500/30 text-blue-300 px-2 py-0.5 rounded">
             <RefreshCw size={10} className="animate-spin text-blue-400" />
-            <span>OTA ({updateStatus.percent}%)</span>
+            <span>
+              OTA {updateStatus.version ? `v${updateStatus.version} ` : ''}({updateStatus.percent}%)
+            </span>
           </div>
+        ) : updateStatus?.status === 'tag-only' ? (
+          <button
+            onClick={() => {
+              const url = `https://github.com/DriifterSelf/agente/releases`;
+              if (window.electronAPI?.openExternal) {
+                window.electronAPI.openExternal(url);
+              } else {
+                handleCheckUpdates();
+              }
+            }}
+            className="flex items-center space-x-1 bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 px-2 py-0.5 rounded font-medium transition"
+            title={`Tag v${updateStatus.version} detectado en GitHub (Haz clic para ver el estado del Release en GitHub)`}
+          >
+            <DownloadCloud size={11} className="text-amber-400" />
+            <span>Nuevo Tag v{updateStatus.version}</span>
+          </button>
         ) : (
           <button
             onClick={handleCheckUpdates}
             disabled={isSyncing}
             className="flex items-center space-x-1 bg-surface/80 hover:bg-surfaceHover text-slate-300 hover:text-white px-2 py-0.5 rounded border border-border/80 transition"
-            title="Buscar actualizaciones OTA"
+            title={`Versión actual: v${appVersion} • Haz clic para buscar nuevos tags (v1.2.0, v1.3.0, v2.0.0...)`}
           >
             <RefreshCw size={10} className={isSyncing ? 'animate-spin text-blue-400' : 'text-slate-400'} />
-            <span className="hidden md:inline">{syncMessage || 'Actualizar'}</span>
+            <span className="hidden md:inline">{syncMessage || `Actualizar (v${appVersion})`}</span>
           </button>
         )}
 

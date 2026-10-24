@@ -4,10 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versión del release (opcional, ej. v1.0.2)'
+        description: 'Versión del release (ej. v1.2.0, v1.3.0, v2.0.0)'
         required: false
         default: ''
 
@@ -39,12 +40,23 @@ jobs:
         run: |
           npm install --no-audit
 
-      - name: 🏷️ Actualizar versión si se especificó manualmente
-        if: github.event.inputs.version != ''
+      - name: 🏷️ Sincronizar versión de package.json con el Tag (v1.2.0, v1.3.0, v2.0.0...)
+        shell: pwsh
         run: |
-          npm version ${{ github.event.inputs.version }} --no-git-tag-version
+          $rawVersion = "${{ github.event.inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($rawVersion)) {
+            $rawVersion = "${{ github.ref_name }}"
+          }
+          Write-Host "Referencia / Tag detectado: $rawVersion"
+          if ($rawVersion -match '(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)') {
+            $cleanVersion = $Matches[1]
+            Write-Host "Actualizando package.json a la versión: $cleanVersion"
+            npm version $cleanVersion --no-git-tag-version --allow-same-version
+          } else {
+            Write-Host "No se detectó patrón semver en '$rawVersion', manteniendo versión de package.json"
+          }
 
-      - name: 📦 Empaquetar e integrar binarios de Python (3.11 Portable)
+      - name: 📦 Empaquetar e integrar binarios de Python (3.11 Portable) y Runtime GPU
         run: |
           npm run prepare:python
 

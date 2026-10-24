@@ -210,38 +210,88 @@ def get_system_status():
         "use_ram_for_kv": kv_loc == "ram"
     }
 
+def _extract_semver_tuple(raw: str):
+    if not raw or not isinstance(raw, str):
+        return None
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", raw)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), f"{m.group(1)}.{m.group(2)}.{m.group(3)}", raw.strip())
+
+def _fetch_remote_github_tags():
+    import urllib.request
+    found = []
+    for endpoint in ["releases", "tags"]:
+        try:
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/DriifterSelf/agente/{endpoint}?per_page=30",
+                headers={"User-Agent": "AgenteStudio/1.0", "Accept": "application/vnd.github+json"}
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if isinstance(data, list):
+                    for item in data:
+                        raw_name = item.get("tag_name") or item.get("name") or ""
+                        parsed = _extract_semver_tuple(raw_name)
+                        if parsed and not any(x[3] == parsed[3] for x in found):
+                            found.append(parsed)
+        except Exception:
+            pass
+    found.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+    return found
+
 @app.get("/api/system/git-info")
 def get_git_info():
+    remote_tags = _fetch_remote_github_tags()
+    latest_remote_tag = f"v{remote_tags[0][3]}" if remote_tags else None
     try:
         branch = subprocess.check_output(["git", "branch", "--show-current"], cwd=BASE_DIR, text=True).strip()
         commit = subprocess.check_output(["git", "log", "-1", "--format=%h - %s (%cr)"], cwd=BASE_DIR, text=True).strip()
         remote = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=BASE_DIR, text=True).strip()
     except Exception:
         branch = "main"
-        commit = "v1.0.0 (Local)"
-        remote = "No configurado"
+        commit = latest_remote_tag or "v1.0.1 (Local)"
+        remote = "https://github.com/DriifterSelf/agente"
     return {
         "branch": branch,
         "latest_commit": commit,
-        "remote_url": remote
+        "remote_url": remote,
+        "latest_tag": latest_remote_tag,
+        "available_tags": [f"v{t[3]}" for t in remote_tags[:10]]
     }
 
 @app.post("/api/system/git-pull")
 def pull_latest_updates():
-    try:
-        pull_res = subprocess.run(["git", "pull", "--rebase"], cwd=BASE_DIR, capture_output=True, text=True, timeout=40)
-        output = pull_res.stdout + pull_res.stderr
-        rebuilt = False
-        if "Already up to date" not in output and "Ya está actualizado" not in output:
-            subprocess.run(["npm", "run", "build:frontend"], cwd=BASE_DIR, capture_output=True, shell=True, timeout=60)
-            rebuilt = True
-        return {
-            "status": "success" if pull_res.returncode == 0 else "error",
-            "message": output.strip(),
-            "rebuilt": rebuilt
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    remote_tags = _fetch_remote_github_tags()
+    latest_ver = remote_tags[0][3] if remote_tags else None
+    latest_raw_tag = remote_tags[0][4] if remote_tags else None
+
+    if os.path.exists(os.path.join(BASE_DIR, ".git")):
+        try:
+            subprocess.run(["git", "fetch", "--all", "--tags", "--force"], cwd=BASE_DIR, capture_output=True, text=True, timeout=25)
+            pull_res = subprocess.run(["git", "pull", "--rebase"], cwd=BASE_DIR, capture_output=True, text=True, timeout=40)
+            output = (pull_res.stdout or "") + (pull_res.stderr or "")
+            rebuilt = False
+            if "Already up to date" not in output and "Ya está actualizado" not in output and pull_res.returncode == 0:
+                subprocess.run(["npm", "run", "build:frontend"], cwd=BASE_DIR, capture_output=True, shell=True, timeout=60)
+                rebuilt = True
+            return {
+                "status": "success" if pull_res.returncode == 0 else "error",
+                "message": output.strip(),
+                "rebuilt": rebuilt,
+                "latest_version": latest_ver,
+                "latest_tag": latest_raw_tag
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e), "latest_version": latest_ver, "latest_tag": latest_raw_tag}
+
+    return {
+        "status": "success",
+        "message": f"Último tag en GitHub: v{latest_ver}" if latest_ver else "Verificación completada",
+        "rebuilt": False,
+        "latest_version": latest_ver,
+        "latest_tag": latest_raw_tag
+    }
 
 @app.get("/api/projects")
 def list_projects():
