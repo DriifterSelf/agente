@@ -207,7 +207,8 @@ def get_system_status():
         "kv_location": kv_loc,
         "context_mem_gb": ctx_mem,
         "context_ram_gb": ctx_mem,
-        "use_ram_for_kv": kv_loc == "ram"
+        "use_ram_for_kv": kv_loc == "ram",
+        "has_runtime": eng_status.get("has_runtime", False)
     }
 
 def _extract_semver_tuple(raw: str):

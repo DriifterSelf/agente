@@ -789,6 +789,8 @@ class InferenceEngine:
         else:
             state = self.engine_state
 
+        has_runtime = self._find_llama_server_binary() is not None
+
         return {
             "active_model": self.active_model or "Sin modelo GGUF",
             "engine_state": state,
@@ -801,5 +803,5 @@ class InferenceEngine:
             "kv_location": self.kv_location,
             "context_mem_gb": round((self.n_ctx / 32768) * 2.4, 1),
             "is_loaded": is_loaded,
-            "has_runtime": Boolean_runtime := (self._find_llama_server_binary() is not None)
+            "has_runtime": has_runtime
         }
