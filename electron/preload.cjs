@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getBackendStatus: () => ipcRenderer.invoke('get-backend-status'),
   getBackendLogs: () => ipcRenderer.invoke('get-backend-logs'),
   restartBackend: () => ipcRenderer.invoke('restart-backend'),
+  selectPythonPath: () => ipcRenderer.invoke('select-python-path'),
+  installPythonWinGet: () => ipcRenderer.invoke('install-python-winget'),
+  downloadPortablePython: () => ipcRenderer.invoke('download-portable-python'),
   onBackendLog: (callback) => {
     const listener = (event, data) => callback(data);
     ipcRenderer.on('backend-log', listener);

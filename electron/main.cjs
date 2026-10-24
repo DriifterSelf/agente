@@ -167,6 +167,36 @@ function setupIpcHandlers() {
     }
     return false;
   });
+
+  ipcMain.handle('select-python-path', async () => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Seleccionar ejecutable de Python (python.exe o py.exe)',
+      filters: [
+        { name: 'Ejecutables Python', extensions: ['exe', 'bat', 'cmd'] },
+        { name: 'Todos los archivos', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    });
+    if (!result.canceled && result.filePaths[0] && backendManager) {
+      return await backendManager.setCustomPython(result.filePaths[0]);
+    }
+    return null;
+  });
+
+  ipcMain.handle('install-python-winget', async () => {
+    if (backendManager) {
+      return await backendManager.installViaWinGet();
+    }
+    return { success: false, error: 'Backend manager no disponible' };
+  });
+
+  ipcMain.handle('download-portable-python', async () => {
+    if (backendManager) {
+      return await backendManager.downloadPortablePython();
+    }
+    return { success: false, error: 'Backend manager no disponible' };
+  });
 }
 
 function createWindow() {

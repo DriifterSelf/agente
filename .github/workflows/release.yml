@@ -44,6 +44,10 @@ jobs:
         run: |
           npm version ${{ github.event.inputs.version }} --no-git-tag-version
 
+      - name: 📦 Empaquetar e integrar binarios de Python (3.11 Portable)
+        run: |
+          npm run prepare:python
+
       - name: 🔨 Compilar Frontend (Vite)
         run: |
           npm run build

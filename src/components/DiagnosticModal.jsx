@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Terminal, Bug, RefreshCw, X, Copy, Check, ExternalLink, AlertTriangle, ShieldCheck, HardDrive } from 'lucide-react';
+import { Terminal, Bug, RefreshCw, X, Copy, Check, ExternalLink, AlertTriangle, ShieldCheck, HardDrive, DownloadCloud, FolderOpen } from 'lucide-react';
 import { API_BASE, isElectron } from '../config';
 
 export default function DiagnosticModal({ isOpen, onClose, systemStatus, isBackendConnected }) {
@@ -7,6 +7,8 @@ export default function DiagnosticModal({ isOpen, onClose, systemStatus, isBacke
   const [copied, setCopied] = useState(false);
   const [backendInfo, setBackendInfo] = useState(null);
   const [isRestarting, setIsRestarting] = useState(false);
+  const [isInstallingWinget, setIsInstallingWinget] = useState(false);
+  const [isDownloadingPortable, setIsDownloadingPortable] = useState(false);
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'errors' | 'backend'
 
   // Capture frontend console errors
@@ -102,6 +104,51 @@ export default function DiagnosticModal({ isOpen, onClose, systemStatus, isBacke
     }
   };
 
+  const handleSelectPythonPath = async () => {
+    if (window.electronAPI?.selectPythonPath) {
+      const res = await window.electronAPI.selectPythonPath();
+      if (res && res.success) {
+        if (window.electronAPI?.getBackendStatus) {
+          window.electronAPI.getBackendStatus().then(setBackendInfo);
+        }
+      }
+    }
+  };
+
+  const handleInstallWinGet = async () => {
+    setIsInstallingWinget(true);
+    try {
+      if (window.electronAPI?.installPythonWinGet) {
+        await window.electronAPI.installPythonWinGet();
+      }
+      setTimeout(() => {
+        setIsInstallingWinget(false);
+        if (window.electronAPI?.getBackendStatus) {
+          window.electronAPI.getBackendStatus().then(setBackendInfo);
+        }
+      }, 3000);
+    } catch (e) {
+      setIsInstallingWinget(false);
+    }
+  };
+
+  const handleDownloadPortablePython = async () => {
+    setIsDownloadingPortable(true);
+    try {
+      if (window.electronAPI?.downloadPortablePython) {
+        await window.electronAPI.downloadPortablePython();
+      }
+      setTimeout(() => {
+        setIsDownloadingPortable(false);
+        if (window.electronAPI?.getBackendStatus) {
+          window.electronAPI.getBackendStatus().then(setBackendInfo);
+        }
+      }, 3000);
+    } catch (e) {
+      setIsDownloadingPortable(false);
+    }
+  };
+
   const handleCopyLogs = () => {
     const text = logs.map((l) => `[${l.time}] [${l.type.toUpperCase()}] ${l.text}`).join('\n');
     const fullReport = `=== AGENTE DIAGNOSTIC REPORT ===
@@ -110,6 +157,7 @@ Plataforma: ${window.electronAPI?.platform || navigator.platform}
 isElectron: ${isElectron}
 API_BASE: ${API_BASE}
 Backend Conectado: ${isBackendConnected}
+Python Detectado: ${backendInfo?.pythonPath || 'No configurado'}
 GPU: ${systemStatus?.gpu_name || 'N/A'} (${systemStatus?.gpu_backend || 'N/A'})
 VRAM: ${systemStatus?.gpu_vram || 'N/A'}
 RAM: ${systemStatus?.ram_total_gb || 'N/A'} GB
@@ -168,6 +216,51 @@ ${text}`;
           </div>
         </div>
 
+        {/* Python Resolution Notice Banner */}
+        {(!isBackendConnected || backendInfo?.status === 'no_python') && (
+          <div className="bg-amber-950/40 border-b border-amber-500/30 px-5 py-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start space-x-2.5">
+              <AlertTriangle size={17} className="text-amber-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold text-amber-200">
+                  Python no detectado o bloqueado por Windows (Código 9009)
+                </div>
+                <div className="text-amber-300/80 text-[11px] mt-0.5 leading-relaxed">
+                  Windows interceptó <code>python</code> con el acceso directo de Microsoft Store. Puedes integrar el runtime portable oficial (~10 MB) con 1 clic:
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+              <button
+                onClick={handleDownloadPortablePython}
+                disabled={isDownloadingPortable}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition shadow-sm text-xs"
+                title="Descarga oficial de Python 3.11 Embeddable (~10MB) de python.org y lo integra en la app"
+              >
+                <DownloadCloud size={13} className={isDownloadingPortable ? 'animate-bounce' : ''} />
+                <span>{isDownloadingPortable ? 'Descargando (~10 MB)...' : 'Descargar Python Portable'}</span>
+              </button>
+              <button
+                onClick={handleInstallWinGet}
+                disabled={isInstallingWinget}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-medium transition shadow-sm text-xs"
+                title="Ejecuta: winget install Python.Python.3.11 de forma automática"
+              >
+                <DownloadCloud size={13} className={isInstallingWinget ? 'animate-bounce' : ''} />
+                <span>{isInstallingWinget ? 'Instalando...' : 'WinGet'}</span>
+              </button>
+              <button
+                onClick={handleSelectPythonPath}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-surface hover:bg-surfaceHover border border-border text-slate-200 font-medium transition text-xs"
+                title="Selecciona la ruta de tu python.exe en disco"
+              >
+                <FolderOpen size={13} className="text-blue-400" />
+                <span>Examinar...</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Status Strip */}
         <div className="bg-[#0A0F18] border-b border-border/60 px-5 py-2.5 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           <div className="flex items-center space-x-2">
@@ -181,27 +274,27 @@ ${text}`;
           </div>
 
           <div className="flex items-center space-x-2">
-            <HardDrive size={14} className="text-purple-400" />
+            <HardDrive size={14} className="text-purple-400 flex-shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[10px] text-slate-400 uppercase font-semibold">Python Runtime</div>
+              <div className="font-mono text-slate-200 truncate" title={backendInfo?.pythonPath || 'No detectado'}>
+                {backendInfo?.pythonPath ? (backendInfo.pythonPath.split('\\').pop() || backendInfo.pythonPath) : 'Ninguno'}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <ShieldCheck size={14} className="text-emerald-400 flex-shrink-0" />
             <div>
               <div className="text-[10px] text-slate-400 uppercase font-semibold">Aceleración</div>
-              <div className="font-mono text-slate-200 truncate">
-                {systemStatus?.gpu_backend || 'CUDA / Vulkan'}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <ShieldCheck size={14} className="text-emerald-400" />
-            <div>
-              <div className="text-[10px] text-slate-400 uppercase font-semibold">Entorno</div>
               <div className="font-mono text-slate-200">
-                {isElectron ? 'Desktop Electron' : 'Web Studio'}
+                {systemStatus?.gpu_backend || 'CUDA 12.x / Vulkan'}
               </div>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
-            <AlertTriangle size={14} className="text-amber-400" />
+            <AlertTriangle size={14} className="text-amber-400 flex-shrink-0" />
             <div>
               <div className="text-[10px] text-slate-400 uppercase font-semibold">Errores detectados</div>
               <div className="font-mono text-slate-200">
