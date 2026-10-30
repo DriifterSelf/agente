@@ -100,6 +100,7 @@ export default function App() {
   // Hardware/System state
   const [systemStatus, setSystemStatus] = useState(null);
   const [isBackendConnected, setIsBackendConnected] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
 
   const activeConversation =
     conversations.find((c) => c.id === activeConversationId) || conversations[0] || null;
@@ -256,7 +257,7 @@ export default function App() {
         const arts = visibleFiles.filter(
           (f) =>
             !f.is_dir &&
-            /\.(xlsx|docx|pptx|pdf|csv|png|jpg|jpeg|webp|zip|json|html|md|txt|mp3|wav|m4a|mp4|mkv|mov)$/i.test(
+            /\.(xlsx|docx|pptx|pdf|csv|png|jpg|jpeg|webp|svg|zip|json|html|md|txt|mp3|wav|m4a|mp4|mkv|mov)$/i.test(
               f.name
             )
         );
@@ -337,11 +338,15 @@ export default function App() {
       if (window.electronAPI && window.electronAPI.openPath) {
         await window.electronAPI.openPath(filePath);
       } else {
-        await fetch(`${API_BASE}/api/system/open-file`, {
+        const res = await fetch(`${API_BASE}/api/system/open-file`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: filePath })
         });
+        if (res.ok) {
+          const data = await res.json();
+          setPreviewFile(data);
+        }
       }
     } catch (e) {
       console.error('Error opening file:', e);
@@ -539,6 +544,7 @@ export default function App() {
           currentStreamContent={currentStreamContent}
           activeActions={activeActions}
           activeProject={activeProject}
+          projectFiles={projectFiles}
           onUploadFile={handleUploadFile}
           conversations={conversations}
           activeConversationId={activeConversation?.id || ''}
@@ -555,6 +561,55 @@ export default function App() {
           activeProject={activeProject}
         />
       </div>
+
+      {/* In-App Preview Modal for Posters & Deliverables */}
+      {previewFile && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0F1523] border border-border rounded-2xl w-full max-w-6xl h-[88vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between bg-[#080C14]">
+              <div className="flex items-center space-x-2.5 truncate">
+                <span className="text-xs font-bold text-slate-100 truncate">
+                  {previewFile.name}
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 font-mono">
+                  {previewFile.ext || 'archivo'}
+                </span>
+              </div>
+              <div className="flex items-center space-x-2">
+                {previewFile.downloadUrl && (
+                  <a
+                    href={`${API_BASE}${previewFile.downloadUrl}`}
+                    download={previewFile.name}
+                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition"
+                  >
+                    ⬇️ Descargar Archivo
+                  </a>
+                )}
+                <button
+                  onClick={() => setPreviewFile(null)}
+                  className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surfaceHover text-slate-300 text-xs font-medium"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 bg-[#0B0F17] overflow-auto">
+              {previewFile.ext === '.html' || previewFile.ext === '.svg' ? (
+                <iframe
+                  title={previewFile.name}
+                  srcDoc={previewFile.content}
+                  className="w-full h-full border-0 bg-white"
+                />
+              ) : (
+                <pre className="p-6 text-xs text-slate-200 font-mono whitespace-pre-wrap leading-relaxed">
+                  {previewFile.content || 'Archivo listo para descargar.'}
+                </pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Generator
 from backend.tools.system_tools import SystemTools
 from backend.tools.office_tools import OfficeTools
 from backend.tools.essay_tools import EssayTools
+from backend.tools.poster_tools import PosterTools
 from backend.tools.media_tools import MediaTools
 from backend.tools.web_tools import WebTools
 from backend.tools.sandbox_tools import SandboxTools
@@ -35,6 +36,8 @@ class AutonomousAgent:
         low = text.lower()
         if "[modo_ensayo]" in low:
             return True
+        if PosterTools.is_poster_request(text):
+            return False
         essay_patterns = [
             r"\bensayo\b",
             r"\bensayos\b",
@@ -84,7 +87,30 @@ class AutonomousAgent:
         return sections or [{"heading": "Documento", "level": 1, "body": markdown_text}]
 
     def _execute_tool(self, project_path: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        if tool_name == "create_essay":
+        if tool_name == "create_poster":
+            topic = params.get("topic") or params.get("title") or "Investigación Académica"
+            config = PosterTools.parse_poster_config(topic)
+            for k in ("source_file", "author", "institution", "theme", "orientation"):
+                if params.get(k):
+                    config[k] = params[k]
+            found = PosterTools.find_best_essay_in_project(project_path, config.get("source_file", ""))
+            poster_data = PosterTools.extract_poster_data_from_essay(
+                engine=self.engine,
+                config=config,
+                essay_filename=found["filename"],
+                essay_text=found["content"]
+            )
+            html_path = PosterTools.export_poster_html(project_path, f"{config['filename_base']}.html", poster_data, config)
+            img_path = PosterTools.export_poster_image(project_path, config["filename_base"], poster_data, config)
+            pptx_path = PosterTools.export_poster_pptx(project_path, config["filename_base"], poster_data)
+            return {
+                "status": "success",
+                "file": html_path,
+                "image_file": img_path,
+                "pptx_file": pptx_path
+            }
+
+        elif tool_name == "create_essay":
             topic = params.get("topic") or params.get("title") or "Análisis Académico"
             config = EssayTools.parse_essay_config(topic)
             for k in ("essay_type", "academic_level", "citation_style", "length_target", "filename"):
@@ -173,7 +199,17 @@ class AutonomousAgent:
         low = last_user_message.lower().strip()
         project_context = self._get_project_context(project_path)
 
-        # 0. Si el usuario solicita un ENSAYO, MONOGRAFÍA o ESTADO DEL ARTE, activar el motor académico multi-sección
+        # 0A. Si el usuario solicita un PÓSTER ACADÉMICO / CARTEL CIENTÍFICO (de su ensayo o tema), activar PosterTools
+        if PosterTools.is_poster_request(last_user_message):
+            for event in PosterTools.generate_poster_stream(
+                engine=self.engine,
+                project_path=project_path,
+                prompt_text=last_user_message
+            ):
+                yield event
+            return
+
+        # 0B. Si el usuario solicita un ENSAYO, MONOGRAFÍA o ESTADO DEL ARTE, activar el motor académico multi-sección
         if self._is_essay_request(last_user_message):
             for event in EssayTools.generate_essay_stream(
                 engine=self.engine,
@@ -189,14 +225,15 @@ class AutonomousAgent:
             "Instrucciones de calidad:\n"
             "- Responde siempre en español de forma exhaustiva, estructurada, técnica y rigurosa. Evita respuestas breves o superficiales.\n"
             "- Cuando expliques un tema o redactes un informe, desarrolla múltiples párrafos profundos con encabezados claros, análisis detallado y ejemplos concretos.\n"
-            "- Si el usuario te pide crear un archivo de Excel (.xlsx), Word (.docx), PowerPoint (.pptx) o código, "
+            "- Si el usuario te pide crear un archivo de Excel (.xlsx), Word (.docx), PowerPoint (.pptx), Póster Académico o código, "
             "primero desarrolla el análisis completo en tu respuesta y al final puedes invocar la herramienta incluyendo un bloque <tool_call>{\"tool\": \"nombre\", \"params\": {...}}</tool_call>.\n"
             "Herramientas disponibles:\n"
-            "1. create_essay: {\"tool\": \"create_essay\", \"params\": {\"topic\": \"Tema del ensayo\", \"essay_type\": \"Argumentativo\", \"academic_level\": \"Posgrado\", \"citation_style\": \"APA 7ª Edición\"}}\n"
-            "2. create_excel: {\"tool\": \"create_excel\", \"params\": {\"filename\": \"nombre.xlsx\", \"sheets\": {\"Hoja1\": [[\"Col1\", \"Col2\"], [\"Dato\", 123]]}}}\n"
-            "3. create_word: {\"tool\": \"create_word\", \"params\": {\"filename\": \"nombre.docx\", \"title\": \"Título\", \"sections\": [{\"heading\": \"Sección 1\", \"level\": 1, \"body\": \"Texto extenso...\"}]}}\n"
-            "4. create_powerpoint: {\"tool\": \"create_powerpoint\", \"params\": {\"filename\": \"nombre.pptx\", \"title\": \"Título\", \"slides\": [{\"title\": \"Slide 1\", \"bullets\": [\"Punto 1\", \"Punto 2\"]}]}}\n"
-            "5. write_file: {\"tool\": \"write_file\", \"params\": {\"filename\": \"script.py\", \"content\": \"...\"}}\n"
+            "1. create_poster: {\"tool\": \"create_poster\", \"params\": {\"topic\": \"Tema o ensayo base\", \"source_file\": \"Ensayo.docx\", \"theme\": \"academic_blue\", \"author\": \"Estudiante\"}}\n"
+            "2. create_essay: {\"tool\": \"create_essay\", \"params\": {\"topic\": \"Tema del ensayo\", \"essay_type\": \"Argumentativo\", \"academic_level\": \"Posgrado\", \"citation_style\": \"APA 7ª Edición\"}}\n"
+            "3. create_excel: {\"tool\": \"create_excel\", \"params\": {\"filename\": \"nombre.xlsx\", \"sheets\": {\"Hoja1\": [[\"Col1\", \"Col2\"], [\"Dato\", 123]]}}}\n"
+            "4. create_word: {\"tool\": \"create_word\", \"params\": {\"filename\": \"nombre.docx\", \"title\": \"Título\", \"sections\": [{\"heading\": \"Sección 1\", \"level\": 1, \"body\": \"Texto extenso...\"}]}}\n"
+            "5. create_powerpoint: {\"tool\": \"create_powerpoint\", \"params\": {\"filename\": \"nombre.pptx\", \"title\": \"Título\", \"slides\": [{\"title\": \"Slide 1\", \"bullets\": [\"Punto 1\", \"Punto 2\"]}]}}\n"
+            "6. write_file: {\"tool\": \"write_file\", \"params\": {\"filename\": \"script.py\", \"content\": \"...\"}}\n"
             "/no_think"
         )
 

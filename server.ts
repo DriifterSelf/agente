@@ -42,6 +42,32 @@ function seedStarterProjects() {
     {
       name: 'Auditoria_Riesgos_2026.pdf',
       content: 'DOCUMENTO DE AUDITORÍA Y CONTROL DE GESTIÓN 2026\n\nAlcance: Evaluación de seguridad, resiliencia operativa y automatización de oficina.',
+    },
+    {
+      name: 'Ensayo_Impacto_IA_Educacion.docx',
+      content: `TÍTULO: Impacto de la Inteligencia Artificial Local en la Educación Superior: Autonomía Cognitiva, Privacidad y Nuevos Paradigmas Pedagógicos
+
+Resumen (Abstract): El presente ensayo académico examina cómo la adopción de modelos de lenguaje ejecutados localmente transforma los procesos de investigación y aprendizaje estudiantil. Se postula como tesis central que la inteligencia artificial de ejecución local fortalece la soberanía de datos, fomenta el pensamiento crítico asistido y democratiza el acceso a herramientas científicas avanzadas sin depender de infraestructura externa.
+
+1. Introducción y Planteamiento de la Tesis
+La integración de sistemas inteligentes en el ámbito escolar y universitario ha redefinido las competencias académicas del siglo XXI. Este ensayo sostiene como tesis central que la combinación de modelos de lenguaje locales con herramientas estructuradas de síntesis documental eleva la calidad de la producción académica cuando se acompaña de rigor metodológico.
+
+2. Marco Teórico y Metodología
+Desde la perspectiva del constructivismo cognitivo y la epistemología tecnológica (Castells, 2010; Simon, 1996), las herramientas computacionales actúan como amplificadores del razonamiento humano. Se empleó una metodología analítico-comparada evaluando cuatro dimensiones: comprensión lectora, estructuración argumentativa, privacidad de datos y eficiencia en diseño científico.
+
+3. Desarrollo Argumentativo
+Eje 1 - Soberanía y Privacidad Académica: El procesamiento en hardware propio garantiza que los borradores, tesis y datos sensibles del estudiante permanezcan bajo su control exclusivo.
+Eje 2 - Síntesis Visual y Comunicación Científica: La traducción de ensayos extensos a formatos visuales como pósters académicos facilita la divulgación en ferias escolares y congresos.
+Eje 3 - Rigor Editorial y Citación: La estructuración guiada reduce la fragmentación argumentativa y asegura el cumplimiento de estándares internacionales como APA 7ª Edición.
+
+4. Conclusiones
+Se concluye que la IA local representa un aliado estratégico para el estudiante moderno, permitiendo transformar investigaciones escritas en productos editoriales y pósters científicos de alto impacto visual y rigor académico.
+
+5. Referencias Bibliográficas
+- Castells, M. (2010). La era de la información: Economía, sociedad y cultura. Siglo XXI Editores.
+- Habermas, J. (1998). Facticidad y validez. Editorial Trotta.
+- Ostrom, E. (2015). Governing the commons. Cambridge University Press.
+- Simon, H. A. (1996). The sciences of the artificial (3rd ed.). MIT Press.`
     }
   ];
 
@@ -396,18 +422,41 @@ app.post('/api/projects/:name/open-folder', (req: Request, res: Response) => {
   res.json({ status: 'success', message: 'Carpeta activa en workspace' });
 });
 
-// 12. Open / Download file
+// 12. Open / Download / Preview file
 app.post('/api/system/open-file', (req: Request, res: Response) => {
   const filePath = req.body?.path;
   if (!filePath) return res.status(400).json({ error: 'Ruta no especificada' });
   
   const fileName = path.basename(filePath);
+  const ext = path.extname(fileName).toLowerCase();
+  let contentPreview = '';
+  if (fs.existsSync(filePath) && /\.(html|svg|md|txt|csv|json|py|js|jsx|ts|tsx|docx|pptx|xlsx|pdf)$/i.test(ext)) {
+    try {
+      contentPreview = fs.readFileSync(filePath, 'utf-8').slice(0, 150000);
+    } catch (e) {}
+  }
+
   res.json({
     status: 'success',
     path: filePath,
     name: fileName,
+    ext,
+    content: contentPreview,
+    rawUrl: `/api/files/raw?path=${encodeURIComponent(filePath)}`,
     downloadUrl: `/api/files/download?path=${encodeURIComponent(filePath)}`
   });
+});
+
+app.get('/api/files/raw', (req: Request, res: Response) => {
+  const filePath = req.query.path as string;
+  if (filePath && fs.existsSync(filePath)) {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.html') res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    else if (ext === '.svg') res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    else res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    return res.send(fs.readFileSync(filePath));
+  }
+  res.status(404).send('Archivo no encontrado');
 });
 
 app.get('/api/files/download', (req: Request, res: Response) => {
@@ -778,6 +827,394 @@ function executeProjectTool(action: ParsedAction, projectPath: string): { status
     return { status: 'success', file_name: fName, full_path: targetPath, message: `Gráfico ${fName} creado.` };
   }
 
+  // 9B. create_poster (Academic & School Essay Poster Generator - HTML5 + SVG + PPTX)
+  if (tool === 'create_poster') {
+    const themes: Record<string, any> = {
+      academic_blue: { primary: '#1E3A8A', secondary: '#2563EB', accent: '#0EA5E9', bg: '#F8FAFC', cardBg: '#FFFFFF', text: '#0F172A', muted: '#475569', border: '#CBD5E1', badgeBg: '#DBEAFE', badgeText: '#1E40AF' },
+      emerald_science: { primary: '#064E3B', secondary: '#059669', accent: '#10B981', bg: '#F0FDF4', cardBg: '#FFFFFF', text: '#064E3B', muted: '#374151', border: '#A7F3D0', badgeBg: '#D1FAE5', badgeText: '#065F46' },
+      oxford_editorial: { primary: '#7C2D12', secondary: '#B45309', accent: '#D97706', bg: '#FFFBEB', cardBg: '#FFFFFF', text: '#1C1917', muted: '#57534E', border: '#FDE68A', badgeBg: '#FEF3C7', badgeText: '#92400E' },
+      cyber_dark: { primary: '#0F172A', secondary: '#3B82F6', accent: '#38BDF8', bg: '#0B0F19', cardBg: '#111827', text: '#F8FAFC', muted: '#94A3B8', border: '#1E293B', badgeBg: '#1E3A8A', badgeText: '#93C5FD' }
+    };
+
+    const themeKey = rawParams.theme && themes[rawParams.theme] ? rawParams.theme : 'academic_blue';
+    const th = themes[themeKey];
+    const orientation = rawParams.orientation === 'portrait' ? 'portrait' : 'landscape';
+
+    const title = rawParams.title || rawParams.topic || 'Póster Académico: Síntesis de Ensayo e Investigación';
+    const subtitle = rawParams.subtitle || `Exposición Escolar y Universitaria • Basado en: ${rawParams.source_file || 'Ensayo del Proyecto'}`;
+    const author = rawParams.author || 'Estudiante / Investigador';
+    const institution = rawParams.institution || 'Proyecto Escolar • Agente Studio';
+    const abstractText = rawParams.abstract || 'El presente trabajo sintetiza los hallazgos centrales del ensayo académico, integrando el planteamiento del problema, la revisión de literatura especializada y el análisis multidimensional de sus implicaciones prácticas y teóricas.';
+    const thesisText = rawParams.thesis || 'La comprensión rigurosa de este fenómeno exige articular evidencia empírica, marco conceptual sólido y una evaluación crítica de sus impactos a mediano y largo plazo.';
+    const methodologyText = rawParams.methodology || 'Metodología analítico-deductiva estructurada en tres fases: 1) Revisión documental y problematización; 2) Contrastación de ejes argumentativos; 3) Síntesis crítica y conclusiones.';
+    const conclusionsText = rawParams.conclusions || 'Los argumentos analizados corroboran la tesis central del ensayo, demostrando la importancia de aplicar enfoques integrales y basados en evidencia para resolver la problemática estudiada.';
+
+    const rawArgs = Array.isArray(rawParams.arguments) && rawParams.arguments.length > 0
+      ? rawParams.arguments
+      : [
+          { title: '1. Fundamentación y Contexto Estructural', body: 'Análisis de las condiciones históricas y teóricas que originan el fenómeno estudiado en el ensayo.' },
+          { title: '2. Evidencia Empírica e Impacto Multidimensional', body: 'Evaluación de los efectos principales, indicadores clave y casos comparados que respaldan la tesis.' },
+          { title: '3. Discusión Crítica y Sostenibilidad Futura', body: 'Contraste frente a posturas alternativas, ética aplicada y recomendaciones de largo plazo.' }
+        ];
+
+    const rawMetrics = Array.isArray(rawParams.key_metrics) && rawParams.key_metrics.length > 0
+      ? rawParams.key_metrics
+      : [
+          { label: 'Solidez Teórica', value: 94 },
+          { label: 'Evidencia Documental', value: 88 },
+          { label: 'Impacto Académico', value: 92 },
+          { label: 'Aplicación Práctica', value: 85 }
+        ];
+
+    const rawRefs = Array.isArray(rawParams.references) && rawParams.references.length > 0
+      ? rawParams.references
+      : [
+          'Castells, M. (2010). La era de la información: Economía, sociedad y cultura. Siglo XXI Editores.',
+          'Habermas, J. (1998). Facticidad y validez. Editorial Trotta.',
+          'Ostrom, E. (2015). Governing the commons. Cambridge University Press.',
+          'Simon, H. A. (1996). The sciences of the artificial (3rd ed.). MIT Press.'
+        ];
+
+    const slug = (rawParams.filename || title).replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+/g, '_').slice(0, 38).replace(/^_|_$/g, '') || 'Ensayo';
+    const htmlFileName = slug.startsWith('Poster_') ? `${slug}.html` : `Poster_${slug}.html`;
+    const svgFileName = slug.startsWith('Poster_') ? `${slug}.svg` : `Poster_${slug}.svg`;
+    const htmlPath = path.join(projectPath, htmlFileName);
+    const svgPath = path.join(projectPath, svgFileName);
+
+    const argsHtml = rawArgs.map((a: any, idx: number) => `
+      <div class="arg-card">
+        <div class="arg-badge">EJE ARGUMENTATIVO 0${idx + 1}</div>
+        <h4>${a.title || `Argumento ${idx + 1}`}</h4>
+        <p>${a.body || a.content || ''}</p>
+      </div>
+    `).join('');
+
+    const barsSvg = rawMetrics.slice(0, 4).map((m: any, i: number) => {
+      const val = Math.min(100, Math.max(15, Number(m.value) || 85));
+      const y = 20 + i * 44;
+      const w = Math.round(val * 2.3);
+      return `
+        <text x="8" y="${y + 15}" fill="${th.text}" font-size="11.5" font-weight="600">${String(m.label || `Factor ${i + 1}`).slice(0, 24)}</text>
+        <rect x="165" y="${y}" width="240" height="22" rx="6" fill="${th.badgeBg}" />
+        <rect x="165" y="${y}" width="${w}" height="22" rx="6" fill="${th.secondary}" />
+        <text x="${172 + w}" y="${y + 15}" fill="${th.primary}" font-size="11" font-weight="700">${val}%</text>
+      `;
+    }).join('');
+
+    const refsHtml = rawRefs.map((r: string) => `<li>${r}</li>`).join('');
+    const todayStr = new Date().toLocaleDateString('es-ES');
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Póster Académico - ${title}</title>
+  <style>
+    :root {
+      --primary: ${th.primary};
+      --secondary: ${th.secondary};
+      --accent: ${th.accent};
+      --bg: ${th.bg};
+      --card-bg: ${th.cardBg};
+      --text: ${th.text};
+      --muted: ${th.muted};
+      --border: ${th.border};
+      --badge-bg: ${th.badgeBg};
+      --badge-text: ${th.badgeText};
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0B0F17;
+      color: var(--text);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .toolbar {
+      width: 100%;
+      max-width: 1360px;
+      background: #1E293B;
+      color: #F8FAFC;
+      padding: 12px 18px;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .btn {
+      background: #2563EB;
+      color: #fff;
+      border: none;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-secondary { background: #334155; }
+    .poster-canvas {
+      width: 100%;
+      max-width: ${orientation === 'portrait' ? '920px' : '1360px'};
+      background: var(--bg);
+      border: 2px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+    }
+    .poster-header {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+      color: #FFFFFF;
+      padding: 26px 32px;
+      border-bottom: 5px solid var(--accent);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+    }
+    .header-tag {
+      display: inline-block;
+      background: rgba(255,255,255,0.18);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .poster-header h1 { font-size: 25px; line-height: 1.22; font-weight: 800; margin-bottom: 6px; }
+    .poster-header p.subtitle { font-size: 13.5px; opacity: 0.92; }
+    .header-meta {
+      text-align: right;
+      background: rgba(0,0,0,0.22);
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      min-width: 230px;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+    .poster-grid {
+      display: grid;
+      grid-template-columns: ${orientation === 'portrait' ? '1fr' : 'repeat(3, 1fr)'};
+      gap: 18px;
+      padding: 24px 28px;
+    }
+    .col { display: flex; flex-direction: column; gap: 16px; }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    .card-highlight { border-left: 6px solid var(--secondary); }
+    .section-title {
+      font-size: 12.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: var(--primary);
+      border-bottom: 2px solid var(--badge-bg);
+      padding-bottom: 6px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .card p { font-size: 13px; line-height: 1.6; color: var(--text); text-align: justify; }
+    .arg-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+    }
+    .arg-card:last-child { margin-bottom: 0; }
+    .arg-badge {
+      display: inline-block;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 5px;
+    }
+    .arg-card h4 { font-size: 13.5px; color: var(--primary); margin-bottom: 5px; }
+    .diagram-flow {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-top: 10px;
+      padding: 10px;
+      background: var(--badge-bg);
+      border-radius: 10px;
+      text-align: center;
+    }
+    .flow-step {
+      flex: 1;
+      background: var(--card-bg);
+      padding: 7px 5px;
+      border-radius: 7px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--primary);
+      border: 1px solid var(--border);
+    }
+    .ref-list { padding-left: 16px; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+    .ref-list li { margin-bottom: 5px; }
+    .poster-footer {
+      background: var(--primary);
+      color: #FFFFFF;
+      padding: 12px 28px;
+      font-size: 11.5px;
+      display: flex;
+      justify-content: space-between;
+    }
+    @media print {
+      body { background: #FFFFFF; padding: 0; }
+      .toolbar { display: none !important; }
+      .poster-canvas { max-width: 100%; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div style="font-size:13px;font-weight:600;">🎓 Póster Académico Interactivo (Sin distorsión de texto • Vectorial de Alta Resolución)</div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" onclick="toggleLayout()">📐 Alternar Horizontal / Vertical</button>
+      <button class="btn" onclick="window.print()">🖨️ Imprimir / Guardar en PDF</button>
+    </div>
+  </div>
+  <div class="poster-canvas" id="posterCanvas">
+    <header class="poster-header">
+      <div>
+        <span class="header-tag">Póster Académico y Científico • Síntesis de Ensayo</span>
+        <h1>${title}</h1>
+        <p class="subtitle">${subtitle}</p>
+      </div>
+      <div class="header-meta">
+        <div><strong>Autor:</strong> ${author}</div>
+        <div><strong>Institución:</strong> ${institution}</div>
+        <div><strong>Fecha:</strong> ${todayStr}</div>
+      </div>
+    </header>
+    <main class="poster-grid" id="posterGrid">
+      <div class="col">
+        <section class="card">
+          <div class="section-title"><span>1. Resumen Ejecutivo (Abstract)</span><span>📄</span></div>
+          <p>${abstractText}</p>
+        </section>
+        <section class="card card-highlight">
+          <div class="section-title"><span>2. Planteamiento y Tesis Central</span><span>🎯</span></div>
+          <p><strong>Tesis Rectora:</strong> ${thesisText}</p>
+        </section>
+        <section class="card">
+          <div class="section-title"><span>3. Marco Teórico y Metodología</span><span>🧭</span></div>
+          <p>${methodologyText}</p>
+          <div class="diagram-flow">
+            <div class="flow-step">1. Estado del Arte</div>
+            <div>➔</div>
+            <div class="flow-step">2. Análisis Crítico</div>
+            <div>➔</div>
+            <div class="flow-step">3. Conclusiones</div>
+          </div>
+        </section>
+      </div>
+      <div class="col">
+        <section class="card">
+          <div class="section-title"><span>4. Desarrollo Argumentativo y Hallazgos</span><span>⚖️</span></div>
+          ${argsHtml}
+        </section>
+      </div>
+      <div class="col">
+        <section class="card">
+          <div class="section-title"><span>5. Evaluación Multidimensional</span><span>📊</span></div>
+          <svg width="100%" height="195" viewBox="0 0 450 195" xmlns="http://www.w3.org/2000/svg">
+            ${barsSvg}
+          </svg>
+        </section>
+        <section class="card card-highlight">
+          <div class="section-title"><span>6. Conclusiones e Implicaciones</span><span>✅</span></div>
+          <p>${conclusionsText}</p>
+        </section>
+        <section class="card">
+          <div class="section-title"><span>7. Referencias Bibliográficas (APA 7)</span><span>📚</span></div>
+          <ul class="ref-list">${refsHtml}</ul>
+        </section>
+      </div>
+    </main>
+    <footer class="poster-footer">
+      <span>Síntesis generada automáticamente a partir del ensayo académico</span>
+      <span>Norma APA 7ª Edición • Diseño Editorial Vectorial</span>
+    </footer>
+  </div>
+  <script>
+    let portrait = ${orientation === 'portrait' ? 'true' : 'false'};
+    function toggleLayout() {
+      portrait = !portrait;
+      document.getElementById('posterCanvas').style.maxWidth = portrait ? '920px' : '1360px';
+      document.getElementById('posterGrid').style.gridTemplateColumns = portrait ? '1fr' : 'repeat(3, 1fr)';
+    }
+  </script>
+</body>
+</html>`;
+
+    fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
+
+    // Also save high-definition SVG image version
+    const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860" style="background:${th.bg};font-family:Segoe UI, sans-serif;">
+      <rect x="20" y="20" width="1360" height="105" rx="14" fill="${th.primary}" />
+      <text x="45" y="65" fill="#FFFFFF" font-size="22" font-weight="bold">${title.slice(0, 88)}</text>
+      <text x="45" y="98" fill="#E2E8F0" font-size="14">Autor: ${author} | Institución: ${institution} | Fecha: ${todayStr}</text>
+      <rect x="20" y="145" width="435" height="330" rx="12" fill="${th.cardBg}" stroke="${th.border}" />
+      <text x="40" y="180" fill="${th.primary}" font-size="15" font-weight="bold">1. RESUMEN Y TESIS CENTRAL</text>
+      <foreignObject x="40" y="195" width="395" height="265">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-size:13px;color:${th.text};line-height:1.5;">
+          <p style="margin-bottom:10px;">${abstractText}</p>
+          <p style="font-weight:bold;color:${th.secondary};">Tesis: ${thesisText}</p>
+        </div>
+      </foreignObject>
+      <rect x="20" y="495" width="435" height="340" rx="12" fill="${th.cardBg}" stroke="${th.border}" />
+      <text x="40" y="530" fill="${th.primary}" font-size="15" font-weight="bold">2. MARCO TEÓRICO Y METODOLOGÍA</text>
+      <foreignObject x="40" y="545" width="395" height="270">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-size:13px;color:${th.text};line-height:1.5;">
+          <p>${methodologyText}</p>
+        </div>
+      </foreignObject>
+      <rect x="475" y="145" width="445" height="690" rx="12" fill="${th.cardBg}" stroke="${th.border}" />
+      <text x="495" y="180" fill="${th.primary}" font-size="15" font-weight="bold">3. DESARROLLO ARGUMENTATIVO</text>
+      <foreignObject x="495" y="195" width="405" height="620">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-size:13px;color:${th.text};line-height:1.5;">
+          ${rawArgs.map((a: any) => `<div style="margin-bottom:14px;padding:10px;background:${th.bg};border-radius:8px;border:1px solid ${th.border};"><strong style="color:${th.primary};display:block;margin-bottom:4px;">${a.title}</strong><span>${a.body}</span></div>`).join('')}
+        </div>
+      </foreignObject>
+      <rect x="940" y="145" width="440" height="330" rx="12" fill="${th.cardBg}" stroke="${th.border}" />
+      <text x="960" y="180" fill="${th.primary}" font-size="15" font-weight="bold">4. EVALUACIÓN MULTIDIMENSIONAL</text>
+      <g transform="translate(950, 195)">${barsSvg}</g>
+      <rect x="940" y="495" width="440" height="340" rx="12" fill="${th.cardBg}" stroke="${th.border}" />
+      <text x="960" y="530" fill="${th.primary}" font-size="15" font-weight="bold">5. CONCLUSIONES Y REFERENCIAS APA 7</text>
+      <foreignObject x="960" y="545" width="400" height="275">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-size:12.5px;color:${th.text};line-height:1.45;">
+          <p style="margin-bottom:12px;"><strong>Conclusión:</strong> ${conclusionsText}</p>
+          <div style="font-size:11px;color:${th.muted};"><strong>Referencias:</strong><br/>${rawRefs.slice(0, 3).join('<br/>')}</div>
+        </div>
+      </foreignObject>
+    </svg>`;
+    fs.writeFileSync(svgPath, svgContent, 'utf-8');
+
+    return {
+      status: 'success',
+      file_name: htmlFileName,
+      full_path: htmlPath,
+      svg_file: svgFileName,
+      message: `Póster Académico ${htmlFileName} y versión vectorial ${svgFileName} creados con éxito.`
+    };
+  }
+
   // 10. web_search
   if (tool === 'web_search') {
     const q = action.query || rawParams.query || 'investigación';
@@ -895,7 +1332,7 @@ Tienes acceso directo al workspace para leer, inspeccionar, crear y editar archi
 Cuando necesites ejecutar una acción, incluye en tu respuesta un bloque con el formato exacto:
 \`\`\`action
 {
-  "tool": "create_excel" | "create_word" | "create_powerpoint" | "create_pdf" | "create_file" | "create_chart_image" | "read_file" | "list_dir" | "search_code" | "edit_file" | "web_search",
+  "tool": "create_poster" | "create_excel" | "create_word" | "create_powerpoint" | "create_pdf" | "create_file" | "create_chart_image" | "read_file" | "list_dir" | "search_code" | "edit_file" | "web_search",
   "filename": "Nombre_Archivo.ext",
   "content": "contenido detallado, completo y estructurado",
   ...parametros...
@@ -907,6 +1344,32 @@ Herramientas disponibles:
 - "list_dir": {} (Explora la estructura del proyecto).
 - "search_code": {"query": "termino"} (Busca coincidencias en los archivos del proyecto).
 - "edit_file": {"file_path": "archivo.ext", "old_str": "texto exacto", "new_str": "nuevo texto"} (Modificación precisa).
+- "create_poster": {
+    "filename": "Poster_Ensayo.html",
+    "title": "Título Académico del Póster",
+    "subtitle": "Subtítulo o materia",
+    "author": "Nombre del estudiante",
+    "institution": "Escuela / Universidad",
+    "source_file": "Ensayo.docx",
+    "theme": "academic_blue" | "emerald_science" | "oxford_editorial" | "cyber_dark",
+    "orientation": "landscape" | "portrait",
+    "abstract": "Resumen ejecutivo denso del ensayo...",
+    "thesis": "Tesis central del ensayo...",
+    "methodology": "Marco teórico y metodología empleada...",
+    "arguments": [
+      {"title": "1. Primer Eje...", "body": "Explicación detallada..."},
+      {"title": "2. Segundo Eje...", "body": "Explicación detallada..."},
+      {"title": "3. Tercer Eje...", "body": "Explicación detallada..."}
+    ],
+    "key_metrics": [
+      {"label": "Dimensión 1", "value": 92},
+      {"label": "Dimensión 2", "value": 87},
+      {"label": "Dimensión 3", "value": 90},
+      {"label": "Dimensión 4", "value": 84}
+    ],
+    "conclusions": "Conclusión principal del ensayo...",
+    "references": ["Autor (Año). Título. Editorial.", "..."]
+  } (Genera un Póster Académico / Científico interactivo e imprimible en alta resolución .html y vectorial .svg a partir de un ensayo del proyecto, sin usar modelos de difusión que deforman el texto).
 - "create_excel": {"filename": "nombre.xlsx", "content": "col1,col2\nval1,val2"} (Genera hoja de cálculo Excel profesional).
 - "create_word": {"filename": "nombre.docx", "title": "...", "content": "..."} (Genera documento Word con secciones estructuradas).
 - "create_powerpoint": {"filename": "nombre.pptx", "content": "..."} (Genera presentación PowerPoint).
@@ -916,6 +1379,7 @@ Herramientas disponibles:
 - "web_search": {"query": "..."} (Investigación web).
 
 FLUJO AUTÓNOMO MULTI-PASO:
+- Si el usuario pide crear un póster de su ensayo (o envía una solicitud con [MODO_POSTER]), lee el ensayo del workspace y ejecuta SIEMPRE la herramienta \`create_poster\` extrayendo fielmente el título, abstract, tesis, argumentos, conclusiones y referencias APA del ensayo.
 - Si necesitas inspeccionar un archivo existente para responder (ej. leer una hoja Excel o un informe), ejecuta primero \`read_file\`. El sistema te devolverá los resultados de la lectura inmediatamente para que en el siguiente paso generes el entregable final.
 - Si vas a crear un entregable, genera SIEMPRE el bloque \`\`\`action\`\`\` y acompáñalo con tu análisis detallado en lenguaje natural.
 - Responde siempre con argumentos claros, datos precisos y en español fluido.`;
@@ -1012,6 +1476,35 @@ FLUJO AUTÓNOMO MULTI-PASO:
         if (QUERY_TOOLS.has(action.tool) || result.status !== 'success') {
           hasQueryTool = true;
           toolResultsSummary.push(`[Herramienta "${action.tool}" ejecutada]:\n${JSON.stringify(result, null, 2)}`);
+        }
+      }
+
+      // If user explicitly requested a poster via [MODO_POSTER] or keywords and model didn't call create_poster yet
+      if (!hasQueryTool && actions.length === 0 && /\[modo_poster\]|\bp[oó]ster\b|\bcartel acad[eé]mico\b/i.test(lastUserMsg)) {
+        const fallbackAct: ParsedAction = {
+          id: `act-poster-${Date.now()}`,
+          tool: 'create_poster',
+          filename: 'Poster_Ensayo_Academico.html',
+          rawParams: {
+            title: 'Póster Académico: Síntesis de Ensayo e Investigación',
+            source_file: 'Ensayo_Impacto_IA_Educacion.docx',
+            theme: /esmeralda|verde/i.test(lastUserMsg) ? 'emerald_science' : (/oxford|humanidades/i.test(lastUserMsg) ? 'oxford_editorial' : (/oscuro|dark|cyber/i.test(lastUserMsg) ? 'cyber_dark' : 'academic_blue')),
+            orientation: /vertical|portrait/i.test(lastUserMsg) ? 'portrait' : 'landscape'
+          }
+        };
+        sendEvent({ type: 'action_start', id: fallbackAct.id, tool: 'create_poster', params: fallbackAct.rawParams });
+        const resPoster = executeProjectTool(fallbackAct, projectPath);
+        sendEvent({ type: 'action_end', id: fallbackAct.id, tool: 'create_poster', params: fallbackAct.rawParams, result: resPoster });
+        if (resPoster.status === 'success' && resPoster.full_path) {
+          sendEvent({
+            type: 'artifact_created',
+            file: {
+              name: resPoster.file_name,
+              path: resPoster.full_path,
+              size: fs.existsSync(resPoster.full_path) ? fs.statSync(resPoster.full_path).size : 0,
+              ext: '.html'
+            }
+          });
         }
       }
 

@@ -279,6 +279,50 @@ function cleanOldUpdaterCache() {
   } catch (e) {}
 }
 
+// Ensure ~/AgenteStudio/models and ~/AgenteStudio/projects exist and rescue any .gguf models
+// from the Electron installation directory BEFORE an NSIS update can overwrite the install folder.
+function rescueUserModelsAndProjects() {
+  try {
+    const userVault = path.join(os.homedir(), 'AgenteStudio');
+    const safeModelsDir = path.join(userVault, 'models');
+    const safeProjectsDir = path.join(userVault, 'projects');
+    fs.mkdirSync(safeModelsDir, { recursive: true });
+    fs.mkdirSync(safeProjectsDir, { recursive: true });
+
+    const candidateInstallDirs = [
+      process.resourcesPath ? path.join(process.resourcesPath, 'models') : null,
+      process.resourcesPath ? path.join(path.dirname(process.resourcesPath), 'models') : null,
+      process.execPath ? path.join(path.dirname(process.execPath), 'models') : null,
+      app.getAppPath() ? path.join(app.getAppPath(), 'models') : null
+    ].filter(Boolean);
+
+    for (const dir of candidateInstallDirs) {
+      if (!fs.existsSync(dir) || path.resolve(dir) === path.resolve(safeModelsDir)) continue;
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.toLowerCase().endsWith('.gguf')) {
+          const srcPath = path.join(dir, entry.name);
+          const dstPath = path.join(safeModelsDir, entry.name);
+          if (!fs.existsSync(dstPath)) {
+            try {
+              fs.renameSync(srcPath, dstPath);
+              logOta(`Modelo GGUF protegido en bóveda persistente: ${dstPath}`);
+            } catch (moveErr) {
+              try {
+                fs.copyFileSync(srcPath, dstPath);
+                fs.unlinkSync(srcPath);
+                logOta(`Modelo GGUF copiado a bóveda persistente: ${dstPath}`);
+              } catch (e) {}
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[StorageGuard] Aviso protegiendo modelos:', e.message);
+  }
+}
+
 function setupAutoUpdater() {
   cleanOldUpdaterCache();
 
@@ -338,6 +382,12 @@ function setupAutoUpdater() {
   });
 
   ipcMain.on('restart-app-for-update', () => {
+    // Stop backend & llama-server first so file locks on .gguf models are released, then rescue any models
+    if (backendManager) {
+      backendManager.stop();
+    }
+    rescueUserModelsAndProjects();
+
     if (customDownloadedInstallerPath && fs.existsSync(customDownloadedInstallerPath)) {
       logOta(`Ejecutando instalador descargado: ${customDownloadedInstallerPath}`);
       try {
@@ -607,6 +657,7 @@ if (process.platform === 'win32') {
 }
 
 app.whenReady().then(async () => {
+  rescueUserModelsAndProjects();
   const basePath = app.isPackaged ? process.resourcesPath : app.getAppPath();
   backendManager = new BackendManager(basePath);
 
@@ -632,6 +683,7 @@ app.on('window-all-closed', () => {
   if (backendManager) {
     backendManager.stop();
   }
+  rescueUserModelsAndProjects();
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -641,4 +693,5 @@ app.on('will-quit', () => {
   if (backendManager) {
     backendManager.stop();
   }
+  rescueUserModelsAndProjects();
 });

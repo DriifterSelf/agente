@@ -1,11 +1,21 @@
-$dest = if (Test-Path "$env:USERPROFILE\AgenteStudio\models") { "$env:USERPROFILE\AgenteStudio\models" } else { ".\models" }
+$dest = "$env:USERPROFILE\AgenteStudio\models"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+# Si habia modelos en .\models dentro de la carpeta del proyecto/instalacion, moverlos a la boveda segura
+if (Test-Path ".\models") {
+    Get-ChildItem -Path ".\models" -Filter "*.gguf" -ErrorAction SilentlyContinue | ForEach-Object {
+        $target = Join-Path $dest $_.Name
+        if (-not (Test-Path $target)) {
+            Move-Item -Path $_.FullName -Destination $target -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 
 Clear-Host
 Write-Host "===========================================================" -ForegroundColor Cyan
-Write-Host "   DESCARGADOR NATIVO DE WINDOWS (100% LIBRE DE PYTHON)" -ForegroundColor Cyan
+Write-Host "   DESCARGADOR NATIVO DE WINDOWS (BOVEDA PERSISTENTE)" -ForegroundColor Cyan
 Write-Host "==========================================================="
-Write-Host "Carpeta de destino: $dest`n"
+Write-Host "Carpeta segura (inmune a actualizaciones): $dest`n"
 Write-Host " [1] Qwen3-30B-A3B-Q4_K_M (~17.3 GB - MoE para 64GB DDR5)"
 Write-Host " [2] Qwen3-8B-Q4_K_M (~4.68 GB - Ultrarrapido para VRAM)`n"
 

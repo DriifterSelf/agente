@@ -81,9 +81,10 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
       case 'jpeg':
       case 'webp':
       case 'bmp':
+      case 'svg':
         return {
           icon: <File size={16} className="text-purple-400" />,
-          label: 'Imagen',
+          label: filename.toLowerCase().startsWith('poster_') ? 'Póster HD' : 'Imagen',
           color: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
           btnHover: 'hover:bg-purple-600 hover:text-white'
         };
@@ -95,9 +96,23 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
           color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
           btnHover: 'hover:bg-yellow-600 hover:text-white'
         };
+      case 'html':
+        if (filename.toLowerCase().startsWith('poster_')) {
+          return {
+            icon: <Presentation size={16} className="text-cyan-400" />,
+            label: 'Póster A0/PDF',
+            color: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40',
+            btnHover: 'hover:bg-cyan-600 hover:text-white'
+          };
+        }
+        return {
+          icon: <File size={16} className="text-cyan-400" />,
+          label: 'HTML',
+          color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30',
+          btnHover: 'hover:bg-cyan-600 hover:text-white'
+        };
       case 'json':
       case 'xml':
-      case 'html':
       case 'sql':
       case 'md':
         return {

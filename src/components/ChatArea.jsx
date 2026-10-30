@@ -36,6 +36,7 @@ export default function ChatArea({
   currentStreamContent,
   activeActions,
   activeProject,
+  projectFiles = [],
   onUploadFile,
   conversations = [],
   activeConversationId = '',
@@ -51,6 +52,16 @@ export default function ChatArea({
   const [copiedIndex, setCopiedIndex] = useState(null);
   const [editingTabId, setEditingTabId] = useState(null);
   const [editingTabTitle, setEditingTabTitle] = useState('');
+
+  // Academic Poster Studio Modal State
+  const [showPosterModal, setShowPosterModal] = useState(false);
+  const [posterSourceFile, setPosterSourceFile] = useState('');
+  const [posterTopic, setPosterTopic] = useState('');
+  const [posterAuthor, setPosterAuthor] = useState('');
+  const [posterInstitution, setPosterInstitution] = useState('');
+  const [posterTheme, setPosterTheme] = useState('academic_blue');
+  const [posterOrientation, setPosterOrientation] = useState('landscape');
+  const [posterExtra, setPosterExtra] = useState('');
 
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
@@ -149,7 +160,57 @@ export default function ChatArea({
     setTimeout(() => setCopiedIndex(null), 2000);
   };
 
+  const essayFilesInProject = (projectFiles || []).filter((f) =>
+    /\.(docx|doc|pdf|md|txt)$/i.test(f.name || '')
+  );
+
+  const handleLaunchPosterStudio = () => {
+    if (!posterSourceFile && essayFilesInProject.length > 0) {
+      const preferred =
+        essayFilesInProject.find((f) => /ensayo/i.test(f.name)) || essayFilesInProject[0];
+      setPosterSourceFile(preferred.name);
+    }
+    setShowPosterModal(true);
+  };
+
+  const handleGeneratePosterFromModal = (e) => {
+    e.preventDefault();
+    if (!activeProject || isStreaming) return;
+    const chosenFile =
+      posterSourceFile ||
+      (essayFilesInProject[0] ? essayFilesInProject[0].name : '');
+    const headerLines = [
+      '[MODO_POSTER]',
+      `archivo_fuente: ${chosenFile || 'Ensayo del proyecto'}`,
+      `tema: ${posterTopic.trim() || (chosenFile ? chosenFile.replace(/\.[^.]+$/, '').replace(/_/g, ' ') : 'Síntesis de Ensayo Académico')}`,
+      `autor: ${posterAuthor.trim() || 'Estudiante / Investigador'}`,
+      `institucion: ${posterInstitution.trim() || 'Proyecto Escolar • Agente Studio'}`,
+      `tema_visual: ${posterTheme}`,
+      `orientacion: ${posterOrientation}`,
+      posterExtra.trim() ? `instrucciones: ${posterExtra.trim()}` : '',
+      '[/MODO_POSTER]'
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const attachTag = chosenFile ? `[Archivo adjunto: "${chosenFile}"]\n\n` : '';
+    const userInstruction = `${attachTag}${headerLines}\n\nPor favor analiza mi ensayo "${chosenFile || 'del proyecto'}" y genera un Póster Académico completo (con Título, Resumen/Abstract, Tesis Central, Marco Teórico, 3 Ejes Argumentativos, Gráfico de Evaluación, Conclusiones y Referencias APA 7) usando la herramienta create_poster.`;
+
+    setShowPosterModal(false);
+    onSendMessage(userInstruction);
+  };
+
   const quickPrompts = [
+    {
+      label: '🖼️ Crear Póster de mi Ensayo',
+      prompt: '__OPEN_POSTER_MODAL__',
+      highlight: true,
+      desc: 'Transforma tu ensayo (.docx, .pdf, .md) en un Póster Académico A0/16:9 imprimible y en alta resolución sin distorsión de texto.'
+    },
+    {
+      label: '🎓 Ensayo / Análisis Académico',
+      prompt: 'Redacta un ensayo académico profundo y riguroso con introducción, marco teórico, desarrollo argumentativo, contraargumentos, conclusiones y referencias APA 7.'
+    },
     {
       label: '📊 Excel Financiero',
       prompt: 'Crea un archivo Excel con el presupuesto anual detallado, fórmulas de sumatoria y margen, y un gráfico comparativo.'
@@ -163,14 +224,6 @@ export default function ChatArea({
       prompt: 'Crea una presentación de PowerPoint de 6 diapositivas con portada, pilares estratégicos y conclusiones clave.'
     },
     {
-      label: '🎓 Ensayo / Análisis Académico',
-      prompt: 'Redacta un ensayo académico profundo y riguroso con introducción, marco teórico, desarrollo argumentativo, contraargumentos, conclusiones y referencias APA 7.'
-    },
-    {
-      label: '🎙️ Audio Narrado MP3',
-      prompt: 'Genera un archivo de audio MP3 narrando una síntesis ejecutiva con voz neuronal clara.'
-    },
-    {
       label: '🌐 Búsqueda e Investigación',
       prompt: 'Investiga en la web las últimas tendencias de tecnología y negocios, y hazme un resumen estructurado.'
     }
@@ -178,6 +231,8 @@ export default function ChatArea({
 
   const renderToolIcon = (tool) => {
     switch (tool) {
+      case 'create_poster':
+        return <Presentation size={14} className="text-cyan-400" />;
       case 'create_excel':
         return <FileSpreadsheet size={14} className="text-emerald-400" />;
       case 'create_word':
@@ -211,6 +266,8 @@ export default function ChatArea({
 
   const renderToolTitle = (tool, params) => {
     switch (tool) {
+      case 'create_poster':
+        return `Maquetando Póster Académico: ${params.filename || 'Poster_Academico.html'}`;
       case 'create_excel':
         return `Generando Excel: ${params.filename || 'Libro.xlsx'}`;
       case 'create_word':
@@ -418,14 +475,28 @@ export default function ChatArea({
               {quickPrompts.map((qp, i) => (
                 <button
                   key={i}
-                  onClick={() => onSendMessage(qp.prompt)}
-                  className="p-3 rounded-xl bg-surface hover:bg-surfaceHover border border-border hover:border-slate-700 text-left transition group shadow-sm"
+                  onClick={() =>
+                    qp.prompt === '__OPEN_POSTER_MODAL__'
+                      ? handleLaunchPosterStudio()
+                      : onSendMessage(qp.prompt)
+                  }
+                  className={`p-3 rounded-xl border text-left transition group shadow-sm ${
+                    qp.highlight
+                      ? 'bg-cyan-950/30 hover:bg-cyan-900/40 border-cyan-500/40 hover:border-cyan-400'
+                      : 'bg-surface hover:bg-surfaceHover border-border hover:border-slate-700'
+                  }`}
                 >
-                  <span className="text-xs font-semibold text-slate-200 group-hover:text-blue-400 block mb-1">
+                  <span
+                    className={`text-xs font-semibold block mb-1 ${
+                      qp.highlight
+                        ? 'text-cyan-300 group-hover:text-cyan-200'
+                        : 'text-slate-200 group-hover:text-blue-400'
+                    }`}
+                  >
                     {qp.label}
                   </span>
                   <span className="text-[11px] text-slate-400 line-clamp-2">
-                    {qp.prompt}
+                    {qp.desc || qp.prompt}
                   </span>
                 </button>
               ))}
@@ -583,6 +654,34 @@ export default function ChatArea({
             </div>
           )}
 
+          {/* Quick Action Strip above Input */}
+          <div className="flex items-center justify-between px-1 pb-0.5">
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                disabled={!activeProject || isStreaming}
+                onClick={handleLaunchPosterStudio}
+                className="flex items-center space-x-1.5 text-[11px] font-medium px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition disabled:opacity-40"
+                title="Abrir asistente para transformar un ensayo en Póster Académico A0 / 16:9"
+              >
+                <Presentation size={12} className="text-cyan-400" />
+                <span>Crear Póster de Ensayo</span>
+              </button>
+              <button
+                type="button"
+                disabled={!activeProject || isStreaming}
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center space-x-1.5 text-[11px] font-medium px-2.5 py-1 rounded-lg bg-surface hover:bg-surfaceHover text-slate-300 border border-border transition disabled:opacity-40"
+              >
+                <Paperclip size={11} className="text-slate-400" />
+                <span>Subir Ensayo (.docx / .pdf / .md)</span>
+              </button>
+            </div>
+            <span className="text-[10px] text-slate-500 hidden sm:inline">
+              Maquetación vectorial nítida (0% consumo extra de VRAM)
+            </span>
+          </div>
+
           <form onSubmit={handleSubmit} className="relative flex items-end">
             {/* Attach File Button */}
             <button
@@ -604,7 +703,7 @@ export default function ChatArea({
               onKeyDown={handleKeyDown}
               placeholder={
                 activeProject
-                  ? `Escribe una instrucción o arrastra archivos aquí...`
+                  ? `Escribe una instrucción o pide: "Crea un póster académico de mi ensayo"...`
                   : 'Selecciona o crea un proyecto para comenzar...'
               }
               disabled={!activeProject || isStreaming}
@@ -641,6 +740,179 @@ export default function ChatArea({
           </form>
         </div>
       </div>
+
+      {/* Academic Poster Studio Modal */}
+      {showPosterModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0F1523] border border-border rounded-2xl max-w-lg w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400">
+                  <Presentation size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-100">
+                    Generador de Póster Académico y Escolar
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Convierte tu ensayo en un Póster A0 / 16:9 nítido, imprimible en PDF y editable
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPosterModal(false)}
+                className="p-1 rounded-lg hover:bg-surfaceHover text-slate-400 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleGeneratePosterFromModal} className="space-y-3.5 text-xs">
+              {/* Source Essay Selector */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-semibold text-slate-300">
+                    1. Selecciona el Ensayo de tu Proyecto
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-[11px] text-cyan-400 hover:text-cyan-300 font-medium"
+                  >
+                    + Subir otro archivo (.docx / .pdf)
+                  </button>
+                </div>
+                {essayFilesInProject.length > 0 ? (
+                  <select
+                    value={posterSourceFile}
+                    onChange={(e) => setPosterSourceFile(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-cyan-500"
+                  >
+                    {essayFilesInProject.map((f, i) => (
+                      <option key={i} value={f.name}>
+                        📄 {f.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="p-2.5 rounded-lg bg-background border border-border text-slate-400 text-[11px]">
+                    No hay ensayos aún en esta carpeta. Puedes subir tu archivo con el botón de arriba o escribir el tema abajo para que el agente lo sintetice.
+                  </div>
+                )}
+              </div>
+
+              {/* Optional Custom Title */}
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  2. Título o Enfoque del Póster (Opcional — se extrae del ensayo si lo dejas vacío)
+                </label>
+                <input
+                  type="text"
+                  value={posterTopic}
+                  onChange={(e) => setPosterTopic(e.target.value)}
+                  placeholder="Ej. Impacto de la Inteligencia Artificial en la Educación Superior..."
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              {/* Author & Institution */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    3. Autor / Estudiante
+                  </label>
+                  <input
+                    type="text"
+                    value={posterAuthor}
+                    onChange={(e) => setPosterAuthor(e.target.value)}
+                    placeholder="Tu nombre completo"
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    4. Escuela / Materia / Institución
+                  </label>
+                  <input
+                    type="text"
+                    value={posterInstitution}
+                    onChange={(e) => setPosterInstitution(e.target.value)}
+                    placeholder="Ej. Metodología de la Investigación"
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
+              {/* Theme & Orientation */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    5. Paleta Editorial del Póster
+                  </label>
+                  <select
+                    value={posterTheme}
+                    onChange={(e) => setPosterTheme(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="academic_blue">🔵 Azul Universitario (Clásico Científico)</option>
+                    <option value="emerald_science">🟢 Esmeralda Investigación (Ciencias / Bio)</option>
+                    <option value="oxford_editorial">🟠 Editorial Oxford (Humanidades / Sociales)</option>
+                    <option value="cyber_dark">⚫ Oscuro Ingeniería (Tecnología / IA)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    6. Orientación / Formato
+                  </label>
+                  <select
+                    value={posterOrientation}
+                    onChange={(e) => setPosterOrientation(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="landscape">🖥️ Horizontal 16:9 (3 Columnas / Proyector)</option>
+                    <option value="portrait">📋 Vertical A0 (Cartel de Exposición)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Extra Instructions */}
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  7. Instrucciones adicionales (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={posterExtra}
+                  onChange={(e) => setPosterExtra(e.target.value)}
+                  placeholder="Ej. Destaca los datos estadísticos del capítulo 3 y las conclusiones..."
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-cyan-950/30 border border-cyan-500/30 text-[11px] text-cyan-200 leading-relaxed">
+                💡 <strong>¿Por qué no usamos difusión para el texto del póster?</strong> Los modelos de difusión deforman las letras en textos largos. Este motor extrae la tesis, argumentos y citas reales de tu ensayo con tu LLM y genera un <strong>Póster Vectorial HTML5/PDF + Imagen HD + PowerPoint</strong> con tipografía 100% legible.
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowPosterModal(false)}
+                  className="px-3.5 py-2 rounded-lg bg-surface hover:bg-surfaceHover text-slate-300 font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-semibold shadow-lg shadow-cyan-600/20 flex items-center space-x-1.5"
+                >
+                  <Sparkles size={14} />
+                  <span>Generar Póster de mi Ensayo</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

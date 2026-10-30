@@ -48,9 +48,15 @@ class InferenceEngine:
     ]
 
     def __init__(self, models_dir: str):
-        self.models_dir = models_dir
         self.root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.user_home_dir = os.path.join(os.path.expanduser("~"), "AgenteStudio")
+        self.safe_models_dir = os.path.join(self.user_home_dir, "models")
+        os.makedirs(self.safe_models_dir, exist_ok=True)
+
+        # Siempre usar la bóveda de usuario (~/AgenteStudio/models) como carpeta principal de descarga y almacenamiento
+        self.models_dir = self.safe_models_dir
+        self._rescue_models_from_install_dir(models_dir)
+
         self.active_model: Optional[str] = None
         self.active_model_path: Optional[str] = None
         self.n_ctx: int = 32768
@@ -67,10 +73,44 @@ class InferenceEngine:
     def _log(self, msg: str):
         print(f"[InferenceEngine] {msg}", flush=True)
 
+    def _rescue_models_from_install_dir(self, extra_dir: Optional[str] = None):
+        """
+        Si existen archivos .gguf dentro del directorio de instalación de la app (que NSIS borra al actualizar),
+        los mueve automáticamente a ~/AgenteStudio/models para que jamás se pierdan en una actualización.
+        """
+        volatile_dirs = [
+            extra_dir,
+            os.path.join(self.root_dir, "models"),
+            os.path.join(os.path.dirname(self.root_dir), "models"),
+        ]
+        for v_dir in volatile_dirs:
+            if not v_dir or not os.path.exists(v_dir):
+                continue
+            if os.path.abspath(v_dir) == os.path.abspath(self.safe_models_dir):
+                continue
+            try:
+                for entry in os.scandir(v_dir):
+                    if entry.is_file() and entry.name.lower().endswith(".gguf"):
+                        dest = os.path.join(self.safe_models_dir, entry.name)
+                        if not os.path.exists(dest):
+                            try:
+                                shutil.move(entry.path, dest)
+                                self._log(f"Modelo rescatado a bóveda persistente contra actualizaciones: {dest}")
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
     def _get_candidate_model_dirs(self) -> List[str]:
+        appdata = os.environ.get("APPDATA") or ""
+        localappdata = os.environ.get("LOCALAPPDATA") or ""
         dirs = [
+            self.safe_models_dir,
             self.models_dir,
             os.path.join(self.user_home_dir, "models"),
+            os.path.join(appdata, "AgenteStudio", "models") if appdata else "",
+            os.path.join(localappdata, "AgenteStudio", "models") if localappdata else "",
+            os.path.join(os.path.expanduser("~"), "Downloads"),
             os.path.join(self.root_dir, "models"),
             os.path.join(os.path.dirname(self.root_dir), "models"),
         ]

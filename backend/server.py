@@ -37,12 +37,56 @@ WINDOWS_RESERVED = {
 
 BASE_DIR = ROOT_DIR
 USER_DATA_DIR = os.path.join(os.path.expanduser("~"), "AgenteStudio")
+os.makedirs(USER_DATA_DIR, exist_ok=True)
 
-ACTIVE_DATA_DIR = USER_DATA_DIR if os.path.exists(USER_DATA_DIR) else BASE_DIR
+# SIEMPRE usar ~/AgenteStudio como bóveda persistente fuera de la carpeta de instalación
+# para que el instalador NSIS o las actualizaciones jamás borren modelos .gguf ni proyectos.
+ACTIVE_DATA_DIR = USER_DATA_DIR
 PROJECTS_DIR = os.path.join(ACTIVE_DATA_DIR, "projects")
 MODELS_DIR = os.path.join(ACTIVE_DATA_DIR, "models")
 os.makedirs(PROJECTS_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
+
+def _migrate_legacy_models_and_projects():
+    """
+    Rescata y mueve automáticamente cualquier modelo .gguf o proyecto que haya quedado
+    dentro de la carpeta de instalación de la app (BASE_DIR) hacia ~/AgenteStudio/
+    para protegerlos de actualizaciones de Electron/NSIS.
+    """
+    legacy_model_dirs = [
+        os.path.join(BASE_DIR, "models"),
+        os.path.join(os.path.dirname(BASE_DIR), "models"),
+    ]
+    for l_dir in legacy_model_dirs:
+        if os.path.exists(l_dir) and os.path.abspath(l_dir) != os.path.abspath(MODELS_DIR):
+            try:
+                for entry in os.scandir(l_dir):
+                    if entry.is_file() and entry.name.lower().endswith(".gguf"):
+                        dest_p = os.path.join(MODELS_DIR, entry.name)
+                        if not os.path.exists(dest_p):
+                            try:
+                                shutil.move(entry.path, dest_p)
+                                print(f"[StorageGuard] Modelo rescatado a bóveda segura: {dest_p}", flush=True)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+    legacy_proj_dir = os.path.join(BASE_DIR, "projects")
+    if os.path.exists(legacy_proj_dir) and os.path.abspath(legacy_proj_dir) != os.path.abspath(PROJECTS_DIR):
+        try:
+            for entry in os.scandir(legacy_proj_dir):
+                if entry.is_dir() and not entry.name.startswith("."):
+                    dest_proj = os.path.join(PROJECTS_DIR, entry.name)
+                    if not os.path.exists(dest_proj):
+                        try:
+                            shutil.copytree(entry.path, dest_proj)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+_migrate_legacy_models_and_projects()
 
 # Create a default project if none exists
 default_proj = os.path.join(PROJECTS_DIR, "Mi Primer Proyecto")
