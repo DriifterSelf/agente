@@ -1296,9 +1296,28 @@ __PODCAST_DATA_JSON__
     const totalDurationSeconds = (podcastData.durationMinutes || 45) * 60;
 
     function getApiBaseUrl() {
-      if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
-        return window.location.origin;
-      }
+      try {
+        if (window.location.protocol === 'about:' || window.location.protocol === 'srcdoc:') {
+          if (window.parent && window.parent.location) {
+            const pProto = window.parent.location.protocol;
+            const pOrigin = window.parent.location.origin;
+            const pPort = window.parent.location.port;
+            if (pProto === 'file:' || pPort === '5173' || pOrigin === 'null') {
+              return 'http://127.0.0.1:8765';
+            }
+            if (pProto === 'http:' || pProto === 'https:') {
+              return pOrigin;
+            }
+          }
+          return 'http://127.0.0.1:8765';
+        }
+        if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+          if (window.location.port === '5173') {
+            return 'http://127.0.0.1:8765';
+          }
+          return window.location.origin;
+        }
+      } catch (e) {}
       return 'http://127.0.0.1:8765';
     }
 
@@ -1526,14 +1545,11 @@ __PODCAST_DATA_JSON__
         advanceToNextLine();
       };
       audio.onerror = () => {
-        // Si el servidor local no está accesible (modo archivo suelto sin backend), usar síntesis del navegador
-        if (voiceMode === 'server') {
-          _playViaBrowserSpeech(line, false);
-        } else {
-          setTimeout(() => advanceToNextLine(), 1500);
-        }
+        if (!isPlaying) return;
+        _playViaBrowserSpeech(line, false);
       };
       audio.play().catch(() => {
+        if (!isPlaying) return;
         _playViaBrowserSpeech(line, false);
       });
     }
@@ -1626,14 +1642,9 @@ __PODCAST_DATA_JSON__
         _playViaBrowserSpeech(line, false);
         return;
       }
-      // En modo 'auto': preferir el motor de Estudio Dual (/api/tts-line) si estamos conectados al backend
-      // porque garantiza Voz de Hombre Barítono + Voz de Mujer en cualquier Windows/Electron
-      const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:' || window.location.protocol === 'about:' || window.location.protocol === 'srcdoc:';
-      if (isHttp) {
-        _playViaServerTts(line);
-      } else {
-        _playViaBrowserSpeech(line, true);
-      }
+      // En modo 'auto': usar siempre primero el motor de Estudio Dual (/api/tts-line)
+      // que entrega Voz Masculina Barítona + Voz Femenina reales, y si no hay servidor cae en voz del navegador
+      _playViaServerTts(line);
     }
 
     function playFromLine(id) {

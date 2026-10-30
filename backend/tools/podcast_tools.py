@@ -8,11 +8,24 @@ import wave
 import struct
 import subprocess
 import sys
+import urllib.parse
 from typing import List, Dict, Any, Generator, Optional
 try:
-    from backend.tools.podcast_player_template import clean_speech_text, build_podcast_html, synthesize_podcast_audio
+    from backend.tools.podcast_player_template import (
+        clean_speech_text,
+        build_podcast_html,
+        synthesize_podcast_audio,
+        parse_script_into_segments,
+        synthesize_single_line_audio,
+    )
 except ImportError:
-    from podcast_player_template import clean_speech_text, build_podcast_html, synthesize_podcast_audio
+    from podcast_player_template import (
+        clean_speech_text,
+        build_podcast_html,
+        synthesize_podcast_audio,
+        parse_script_into_segments,
+        synthesize_single_line_audio,
+    )
 
 
 class PodcastTools:

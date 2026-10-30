@@ -450,15 +450,15 @@ def download_project_file(name: str, filename: str):
 @app.post("/api/system/open-file")
 def open_file_in_windows(req: OpenFileRequest):
     file_path = req.path
-    # Si el usuario abre un reproductor Podcast_*.html antiguo que no tenía síntesis de voz o botón MP3,
-    # actualizarlo automáticamente en disco antes de abrirlo para que siempre tenga voz y efectos reales.
+    # Si el usuario abre un reproductor Podcast_*.html de una versión anterior,
+    # actualizarlo automáticamente en disco antes de abrirlo para que siempre tenga voz dual y efectos reales.
     if file_path and os.path.exists(file_path):
         fn_low = os.path.basename(file_path).lower()
         if fn_low.endswith(".html") and "podcast" in fn_low and PodcastTools:
             try:
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     curr_html = f.read()
-                if "exportPodcastMp3Again" not in curr_html or "_playViaServerTts" not in curr_html:
+                if "exportPodcastMp3Again" not in curr_html or "pProto === 'file:'" not in curr_html:
                     proj_dir = os.path.dirname(file_path)
                     PodcastTools.reexport_project_podcast(proj_dir)
             except Exception:

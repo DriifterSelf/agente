@@ -491,7 +491,7 @@ app.post('/api/system/open-file', (req: Request, res: Response) => {
   if (fs.existsSync(filePath) && ext === '.html' && fileName.toLowerCase().includes('podcast')) {
     try {
       const currHtml = fs.readFileSync(filePath, 'utf-8');
-      if (!currHtml.includes('exportPodcastMp3Again') || !currHtml.includes('_playViaServerTts')) {
+      if (!currHtml.includes('exportPodcastMp3Again') || !currHtml.includes("pProto === 'file:'")) {
         const projDir = path.dirname(filePath);
         const pyCode = [
           'import sys, os; sys.path.insert(0, os.getcwd());',
