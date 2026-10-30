@@ -3,7 +3,16 @@ import re
 import json
 import time
 import datetime
+import math
+import wave
+import struct
+import subprocess
+import sys
 from typing import List, Dict, Any, Generator, Optional
+try:
+    from backend.tools.podcast_player_template import clean_speech_text, build_podcast_html, synthesize_podcast_audio
+except ImportError:
+    from podcast_player_template import clean_speech_text, build_podcast_html, synthesize_podcast_audio
 
 
 class PodcastTools:
@@ -566,396 +575,32 @@ class PodcastTools:
         segments: List[Dict[str, Any]]
     ) -> str:
         """
-        Genera un reproductor y visor de Podcast interactivo en HTML5,
-        con diseño de Spotify/Apple Podcasts, timeline cronometrado de 45 minutos,
-        selector de velocidad (1x, 1.25x, 1.5x), capítulos clickeables y transcripción completa.
+        Genera el Reproductor y Visor de Radio/Podcast de Estudio Profesional (.html):
+        - Emite DOBLE VOZ REAL diferenciada: Locutor A (Hombre/Alex) y Locutora B (Mujer/Elena).
+        - Efectos de sonido (SFX) reales generados con Web Audio API:
+          * Cortinilla de Apertura / Intro Jingle polifónico
+          * Sweeps y Chimes de transición entre bloques
+          * Música de fondo sutil de cabina (Studio Ambiance Bed)
+          * Outro Jingle con fade-out al terminar
+        - Lectura 100% natural sin leer corchetes, 'SFX' ni etiquetas técnicas.
+        - Reproducción secuencial completa sin cortes cubriendo los 45 minutos.
+        - Control de velocidad (1.0x, 1.25x, 1.5x, 2.0x), buscador de capítulos y click-to-play.
         """
         os.makedirs(project_path, exist_ok=True)
-        if not filename.lower().endswith(".html"):
-            filename += ".html"
+        if not filename.lower().endswith('.html'):
+            filename += '.html'
         target_html = os.path.join(project_path, filename)
 
-        chapters_html = ""
-        transcription_html = ""
-        for idx, s in enumerate(segments, 1):
-            chapters_html += f"""
-            <div class="chapter-item" onclick="jumpToChapter({idx})">
-              <div class="chapter-time">{s['time_range'].split('-')[0].strip()}</div>
-              <div class="chapter-info">
-                <div class="chapter-title">{s['title']}</div>
-                <div class="chapter-meta">Duración estimada: {s.get('time_range', '')}</div>
-              </div>
-            </div>
-            """
+        html_content = build_podcast_html(
+            title=title,
+            show_name=config.get('show_name', 'Onda Futura'),
+            host_a_name=config.get('host_a', 'Alex').split('(')[0].strip(),
+            host_b_name=config.get('host_b', 'Elena').split('(')[0].strip(),
+            duration=config.get('duration_minutes', 45),
+            segments=segments
+        )
 
-            # Transcripción del bloque
-            body_formatted = ""
-            for p in s["body"].split("\n\n"):
-                p_clean = p.strip()
-                if not p_clean:
-                    continue
-                if p_clean.startswith("[") and ("sfx" in p_clean.lower() or "música" in p_clean.lower()):
-                    body_formatted += f'<div class="cue-sound">🔔 {p_clean}</div>'
-                elif "**" in p_clean:
-                    m_spk = re.match(r"^\*\*([^*]+)\*\*:\s*(.*)$", p_clean)
-                    if m_spk:
-                        spk = m_spk.group(1)
-                        speech = m_spk.group(2)
-                        is_host_a = config['host_a'].split('(')[0].strip() in spk
-                        badge_class = "speaker-a" if is_host_a else "speaker-b"
-                        body_formatted += f'''
-                        <div class="dialogue-row">
-                          <div class="speaker-badge {badge_class}">{spk}</div>
-                          <div class="speech-text">{speech}</div>
-                        </div>
-                        '''
-                    else:
-                        body_formatted += f'<p class="dialogue-p">{p_clean}</p>'
-                else:
-                    body_formatted += f'<p class="dialogue-p">{p_clean}</p>'
-
-            transcription_html += f"""
-            <section class="segment-section" id="chapter-{idx}">
-              <div class="segment-header">
-                <h3>{s['title']}</h3>
-                <span class="badge-time">{s['time_range']}</span>
-              </div>
-              <div class="segment-body">
-                {body_formatted}
-              </div>
-            </section>
-            """
-
-        today_str = datetime.date.today().strftime("%d de %B de %Y")
-
-        html_content = f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Podcast: {title} ({config['duration_minutes']} min)</title>
-  <style>
-    :root {{
-      --bg: #090D16;
-      --card-bg: #111827;
-      --accent: #3B82F6;
-      --accent-grad: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
-      --text: #F8FAFC;
-      --muted: #94A3B8;
-      --border: #1E293B;
-      --host-a: #60A5FA;
-      --host-b: #34D399;
-      --sfx: #F59E0B;
-    }}
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      padding-bottom: 90px;
-    }}
-    .player-header {{
-      background: linear-gradient(180deg, #1E293B 0%, var(--bg) 100%);
-      padding: 40px 24px 30px;
-      border-bottom: 1px solid var(--border);
-    }}
-    .header-container {{
-      max-width: 1100px;
-      margin: 0 auto;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 30px;
-      align-items: center;
-    }}
-    .cover-art {{
-      width: 170px;
-      height: 170px;
-      border-radius: 16px;
-      background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 15px 35px rgba(59, 130, 246, 0.3);
-      font-size: 55px;
-      flex-shrink: 0;
-    }}
-    .cover-tag {{
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 1.5px;
-      color: #FFFFFF;
-      text-transform: uppercase;
-      margin-top: 4px;
-    }}
-    .header-info {{ flex: 1; min-width: 280px; }}
-    .badge-show {{
-      display: inline-block;
-      background: rgba(59, 130, 246, 0.15);
-      color: #93C5FD;
-      border: 1px solid rgba(59, 130, 246, 0.3);
-      padding: 4px 12px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      margin-bottom: 10px;
-    }}
-    .podcast-title {{
-      font-size: 28px;
-      font-weight: 800;
-      line-height: 1.25;
-      margin-bottom: 8px;
-      color: #FFFFFF;
-    }}
-    .podcast-meta {{
-      color: var(--muted);
-      font-size: 13.5px;
-      margin-bottom: 16px;
-    }}
-    .playback-toolbar {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
-    }}
-    .btn-play {{
-      background: #2563EB;
-      color: #FFFFFF;
-      border: none;
-      padding: 10px 22px;
-      border-radius: 999px;
-      font-weight: 700;
-      font-size: 14px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      transition: transform 0.15s, background 0.2s;
-    }}
-    .btn-play:hover {{ background: #1D4ED8; transform: scale(1.02); }}
-    .speed-btn {{
-      background: var(--card-bg);
-      color: var(--text);
-      border: 1px solid var(--border);
-      padding: 8px 14px;
-      border-radius: 8px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-    }}
-    .btn-print {{
-      background: transparent;
-      color: var(--muted);
-      border: 1px solid var(--border);
-      padding: 8px 16px;
-      border-radius: 8px;
-      font-size: 12px;
-      cursor: pointer;
-    }}
-    .btn-print:hover {{ color: #FFFFFF; border-color: #64748B; }}
-
-    .main-layout {{
-      max-width: 1100px;
-      margin: 30px auto;
-      padding: 0 20px;
-      display: grid;
-      grid-template-columns: 320px 1fr;
-      gap: 30px;
-    }}
-    @media (max-width: 860px) {{
-      .main-layout {{ grid-template-columns: 1fr; }}
-    }}
-    .chapters-sidebar {{
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 20px;
-      height: fit-content;
-      position: sticky;
-      top: 20px;
-    }}
-    .sidebar-heading {{
-      font-size: 13px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--muted);
-      margin-bottom: 14px;
-    }}
-    .chapter-item {{
-      display: flex;
-      gap: 12px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: background 0.2s;
-      margin-bottom: 6px;
-    }}
-    .chapter-item:hover {{ background: rgba(255, 255, 255, 0.05); }}
-    .chapter-time {{
-      font-size: 12px;
-      font-family: monospace;
-      color: #60A5FA;
-      font-weight: 700;
-      padding-top: 2px;
-    }}
-    .chapter-title {{
-      font-size: 13px;
-      font-weight: 600;
-      color: #E2E8F0;
-      line-height: 1.35;
-    }}
-    .chapter-meta {{ font-size: 11px; color: var(--muted); margin-top: 2px; }}
-
-    .transcription-feed {{
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
-    }}
-    .segment-section {{
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 24px;
-    }}
-    .segment-header {{
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 12px;
-      margin-bottom: 18px;
-    }}
-    .segment-header h3 {{
-      font-size: 16px;
-      font-weight: 700;
-      color: #FFFFFF;
-    }}
-    .badge-time {{
-      font-family: monospace;
-      font-size: 11px;
-      padding: 3px 8px;
-      background: rgba(59, 130, 246, 0.15);
-      color: #93C5FD;
-      border-radius: 6px;
-    }}
-    .cue-sound {{
-      background: rgba(245, 158, 11, 0.1);
-      border-left: 3px solid var(--sfx);
-      padding: 6px 12px;
-      font-size: 11.5px;
-      color: #FCD34D;
-      font-family: monospace;
-      margin: 12px 0;
-      border-radius: 0 6px 6px 0;
-    }}
-    .dialogue-row {{
-      margin-bottom: 14px;
-    }}
-    .speaker-badge {{
-      display: inline-block;
-      font-size: 12px;
-      font-weight: 800;
-      padding: 2px 8px;
-      border-radius: 4px;
-      margin-bottom: 4px;
-    }}
-    .speaker-a {{ background: rgba(59, 130, 246, 0.2); color: var(--host-a); }}
-    .speaker-b {{ background: rgba(16, 185, 129, 0.2); color: var(--host-b); }}
-    .speech-text {{
-      font-size: 14.5px;
-      line-height: 1.68;
-      color: #CBD5E1;
-      text-align: justify;
-    }}
-    .dialogue-p {{
-      font-size: 14px;
-      line-height: 1.6;
-      color: #CBD5E1;
-      margin-bottom: 10px;
-    }}
-  </style>
-</head>
-<body>
-  <header class="player-header">
-    <div class="header-container">
-      <div class="cover-art">
-        <span>🎙️</span>
-        <span class="cover-tag">45 MIN</span>
-      </div>
-      <div class="header-info">
-        <span class="badge-show">{config['show_name']} • EPISODIO ESPECIAL</span>
-        <h1 class="podcast-title">{title}</h1>
-        <p class="podcast-meta">
-          Conducción: <strong>{config['host_a']}</strong> & <strong>{config['host_b']}</strong> • 
-          Duración total: <strong>{config['duration_minutes']}:00 minutos</strong> • Formato Cabina Radial
-        </p>
-        <div class="playback-toolbar">
-          <button class="btn-play" onclick="togglePlay()">
-            <span id="playIcon">▶</span> <span id="playLabel">Reproducir Episodio (45 Min)</span>
-          </button>
-          <button class="speed-btn" onclick="cycleSpeed()">Velocidad: <span id="speedLabel">1.0x</span></button>
-          <button class="btn-print" onclick="window.print()">🖨️ Imprimir Guión Completo</button>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <main class="main-layout">
-    <aside class="chapters-sidebar">
-      <div class="sidebar-heading">Escaleta del Episodio (45:00)</div>
-      {chapters_html}
-    </aside>
-
-    <div class="transcription-feed">
-      {transcription_html}
-    </div>
-  </main>
-
-  <script>
-    let isPlaying = false;
-    let currentSpeed = 1.0;
-    const speeds = [1.0, 1.25, 1.5, 2.0];
-    let speedIdx = 0;
-
-    function togglePlay() {{
-      isPlaying = !isPlaying;
-      document.getElementById('playIcon').textContent = isPlaying ? '⏸' : '▶';
-      document.getElementById('playLabel').textContent = isPlaying ? 'Pausar Reproducción' : 'Reproducir Episodio (45 Min)';
-      if (isPlaying && 'speechSynthesis' in window) {{
-        window.speechSynthesis.cancel();
-        const firstSegment = document.querySelector('.speech-text');
-        if (firstSegment) {{
-          const utterance = new SpeechSynthesisUtterance(firstSegment.textContent.slice(0, 400));
-          utterance.lang = 'es-ES';
-          utterance.rate = currentSpeed;
-          window.speechSynthesis.speak(utterance);
-        }}
-      }} else if ('speechSynthesis' in window) {{
-        window.speechSynthesis.cancel();
-      }}
-    }}
-
-    function cycleSpeed() {{
-      speedIdx = (speedIdx + 1) % speeds.length;
-      currentSpeed = speeds[speedIdx];
-      document.getElementById('speedLabel').textContent = currentSpeed + 'x';
-    }}
-
-    function jumpToChapter(idx) {{
-      const elem = document.getElementById('chapter-' + idx);
-      if (elem) {{
-        elem.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
-      }}
-    }}
-  </script>
-</body>
-</html>
-"""
-        with open(target_html, "w", encoding="utf-8") as fh:
+        with open(target_html, 'w', encoding='utf-8') as fh:
             fh.write(html_content)
         return target_html
 
@@ -965,32 +610,15 @@ class PodcastTools:
         project_path: str,
         filename: str,
         text_content: str,
-        lang: str = "es"
+        lang: str = 'es'
     ) -> Optional[str]:
-        """Genera archivo de audio real MP3 a partir del guión del podcast usando gTTS si está disponible."""
-        os.makedirs(project_path, exist_ok=True)
-        if not filename.lower().endswith(".mp3"):
-            filename += ".mp3"
-        target_mp3 = os.path.join(project_path, filename)
-
-        clean_text = re.sub(r"\[[^\]]+\]", "", text_content)
-        clean_text = re.sub(r"\*\*([^*]+)\*\*:", r"\1 dice:", clean_text).strip()
-        speech_sample = clean_text[:4000]
-
-        try:
-            from gtts import gTTS
-            tts = gTTS(text=speech_sample, lang=lang, slow=False)
-            tts.save(target_mp3)
-            return target_mp3
-        except Exception:
-            try:
-                # Si gTTS no está instalado o no hay internet, crear un archivo marcador de audio para el reproductor
-                with open(target_mp3, "wb") as f_fake:
-                    # Cabecera básica de marcador
-                    f_fake.write(b"ID3\x03\x00\x00\x00\x00\x00\x00")
-                return target_mp3
-            except Exception:
-                return None
+        """
+        Genera archivo de audio real (.wav y .mp3) del master del podcast:
+        1. Limpia todo el texto con clean_speech_text (sin corchetes, sin SFX leídos).
+        2. Intenta gTTS o síntesis nativa de PowerShell (SAPI5) en Windows.
+        3. Genera un archivo WAV broadcast real con melodía de apertura, chimes y tonos de emisión.
+        """
+        return synthesize_podcast_audio(project_path, filename, text_content, lang)
 
     @classmethod
     def generate_podcast_stream(

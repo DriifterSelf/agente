@@ -301,7 +301,8 @@ class AutonomousAgent:
         )
 
         prepared_messages = [{"role": "system", "content": system_prompt}]
-        for m in messages:
+        recent_messages = messages[-10:] if len(messages) > 10 else messages
+        for m in recent_messages:
             r = m.get("role", "user")
             c = m.get("content", "")
             if r in ("user", "assistant", "system") and c:

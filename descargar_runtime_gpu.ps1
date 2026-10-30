@@ -19,54 +19,58 @@ $extractDir = Join-Path $runtimeDir "_extract_tmp"
 
 Write-Host "[1/3] Consultando ultima version oficial en GitHub (ggml-org/llama.cpp)..." -ForegroundColor Yellow
 
-$downloadUrl = $null
+$cudaBinUrl = $null
+$cudartUrl = $null
+$vulkanUrl = $null
+
 try {
     $jsonRaw = curl.exe --ssl-no-revoke -s -L "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
     $release = $jsonRaw | ConvertFrom-Json
     foreach ($asset in $release.assets) {
-        if ($asset.name -match "bin-win-vulkan-x64\.zip$") {
-            $downloadUrl = $asset.browser_download_url
-            Write-Host "      Encontrada version GPU Vulkan/NVIDIA: $($asset.name)" -ForegroundColor Green
-            break
+        if ($asset.name -match "bin-win-cuda-12\.4-x64\.zip$") {
+            $cudaBinUrl = $asset.browser_download_url
         }
-    }
-    if (-not $downloadUrl) {
-        foreach ($asset in $release.assets) {
-            if ($asset.name -match "bin-win-avx2-x64\.zip$") {
-                $downloadUrl = $asset.browser_download_url
-                Write-Host "      Encontrada version AVX2 x64: $($asset.name)" -ForegroundColor Green
-                break
-            }
+        if ($asset.name -match "cudart-llama-bin-win-cuda-12\.4-x64\.zip$") {
+            $cudartUrl = $asset.browser_download_url
+        }
+        if ($asset.name -match "bin-win-vulkan-x64\.zip$") {
+            $vulkanUrl = $asset.browser_download_url
         }
     }
 } catch {
-    Write-Host "      Aviso al consultar API, usando enlace directo de respaldo..." -ForegroundColor DarkYellow
+    Write-Host "      Aviso al consultar API de GitHub..." -ForegroundColor DarkYellow
 }
 
-if (-not $downloadUrl) {
-    $downloadUrl = "https://github.com/ggml-org/llama.cpp/releases/download/b5092/llama-b5092-bin-win-vulkan-x64.zip"
+if ($cudaBinUrl -and $cudartUrl) {
+    Write-Host "      [OK] Detectado paquete nativo NVIDIA CUDA 12.4 para RTX 4070" -ForegroundColor Green
+    Write-Host "`n[2/3] Descargando binarios nativos CUDA 12.4..." -ForegroundColor Yellow
+    $cudaZip = Join-Path $runtimeDir "cuda-bin.zip"
+    $cudartZip = Join-Path $runtimeDir "cudart.zip"
+    curl.exe --ssl-no-revoke -L --fail --retry 5 "$cudaBinUrl" -o "$cudaZip"
+    curl.exe --ssl-no-revoke -L --fail --retry 5 "$cudartUrl" -o "$cudartZip"
+    
+    Write-Host "`n[3/3] Extrayendo llama-server.exe y librerias CUDA 12..." -ForegroundColor Yellow
+    if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
+    Expand-Archive -Path $cudaZip -DestinationPath $extractDir -Force
+    Expand-Archive -Path $cudartZip -DestinationPath $extractDir -Force
+    
+    Get-ChildItem -Path $extractDir -Recurse -File | Where-Object { $_.Extension -in ".exe", ".dll" } | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination (Join-Path $runtimeDir $_.Name) -Force
+    }
+    Remove-Item -Force $cudaZip, $cudartZip -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
+} else {
+    $downloadUrl = if ($vulkanUrl) { $vulkanUrl } else { "https://github.com/ggml-org/llama.cpp/releases/download/b5092/llama-b5092-bin-win-vulkan-x64.zip" }
+    Write-Host "      [OK] Descargando paquete GPU Vulkan: $downloadUrl" -ForegroundColor Yellow
+    curl.exe --ssl-no-revoke -L --fail --retry 5 "$downloadUrl" -o "$zipPath"
+    if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
+    Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+    Get-ChildItem -Path $extractDir -Recurse -File | Where-Object { $_.Extension -in ".exe", ".dll" } | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination (Join-Path $runtimeDir $_.Name) -Force
+    }
+    Remove-Item -Force $zipPath -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
 }
-
-Write-Host "`n[2/3] Descargando paquete de binarios (~22 MB)..." -ForegroundColor Yellow
-curl.exe --ssl-no-revoke -L --fail --retry 5 --retry-delay 3 "$downloadUrl" -o "$zipPath"
-
-if (-not (Test-Path $zipPath)) {
-    Write-Host "`n[ERROR] No se pudo descargar el archivo ZIP." -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "`n[3/3] Extrayendo llama-server.exe y librerias DLL..." -ForegroundColor Yellow
-if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
-Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
-
-Get-ChildItem -Path $extractDir -Recurse -File | Where-Object {
-    $_.Extension -in ".exe", ".dll"
-} | ForEach-Object {
-    Copy-Item -Path $_.FullName -Destination (Join-Path $runtimeDir $_.Name) -Force
-}
-
-Remove-Item -Force $zipPath -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
 
 $serverExe = Join-Path $runtimeDir "llama-server.exe"
 if (Test-Path $serverExe) {
