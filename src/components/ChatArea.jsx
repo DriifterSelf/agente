@@ -25,7 +25,10 @@ import {
   Code,
   Plus,
   MessageSquare,
-  Edit2
+  Edit2,
+  Headphones,
+  Radio,
+  Mic
 } from 'lucide-react';
 
 export default function ChatArea({
@@ -62,6 +65,16 @@ export default function ChatArea({
   const [posterTheme, setPosterTheme] = useState('academic_blue');
   const [posterOrientation, setPosterOrientation] = useState('landscape');
   const [posterExtra, setPosterExtra] = useState('');
+
+  // 45-Minute Podcast Studio Modal State
+  const [showPodcastModal, setShowPodcastModal] = useState(false);
+  const [podcastTopic, setPodcastTopic] = useState('');
+  const [podcastShowName, setPodcastShowName] = useState('Onda Futura');
+  const [podcastDuration, setPodcastDuration] = useState(45);
+  const [podcastHostA, setPodcastHostA] = useState('Alex');
+  const [podcastHostB, setPodcastHostB] = useState('Elena');
+  const [podcastSourceFile, setPodcastSourceFile] = useState('');
+  const [podcastTone, setPodcastTone] = useState('analítico y entretenido');
 
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
@@ -200,7 +213,48 @@ export default function ChatArea({
     onSendMessage(userInstruction);
   };
 
+  const handleLaunchPodcastStudio = () => {
+    if (!podcastSourceFile && essayFilesInProject.length > 0) {
+      const preferred = essayFilesInProject.find((f) => /ensayo/i.test(f.name)) || essayFilesInProject[0];
+      setPodcastSourceFile(preferred.name);
+      if (!podcastTopic) {
+        setPodcastTopic(preferred.name.replace(/\.[^.]+$/, '').replace(/_/g, ' '));
+      }
+    }
+    setShowPodcastModal(true);
+  };
+
+  const handleGeneratePodcastFromModal = (e) => {
+    e.preventDefault();
+    if (!activeProject || isStreaming) return;
+    const finalTopic = podcastTopic.trim() || (podcastSourceFile ? podcastSourceFile.replace(/\.[^.]+$/, '').replace(/_/g, ' ') : 'Innovación, Tecnología y Soberanía Digital');
+    const chosenFile = podcastSourceFile || '';
+    const headerLines = [
+      '[MODO_PODCAST]',
+      `tema: ${finalTopic}`,
+      `duracion: ${podcastDuration}`,
+      `programa: ${podcastShowName.trim() || 'Onda Futura'}`,
+      `conductores: ${podcastHostA.trim() || 'Alex'}, ${podcastHostB.trim() || 'Elena'}`,
+      `tono: ${podcastTone}`,
+      chosenFile ? `archivo_fuente: ${chosenFile}` : '',
+      '[/MODO_PODCAST]'
+    ].filter(Boolean).join('\n');
+
+    const attachTag = chosenFile ? `[Archivo adjunto: "${chosenFile}"]\n\n` : '';
+    const promptText = `${attachTag}${headerLines}\n\nPor favor produce un programa de podcast completo de ${podcastDuration} minutos (~6,500 palabras) sobre "${finalTopic}" con los conductores ${podcastHostA} y ${podcastHostB}. Genera el paquete completo: guión de radio en Word (.docx), reproductor interactivo en HTML5 (.html), audio MP3 (.mp3) y escaleta técnica (.md) usando la herramienta create_podcast.`;
+
+    setShowPodcastModal(false);
+    onSendMessage(promptText);
+  };
+
   const quickPrompts = [
+    {
+      label: '🎙️ Crear Podcast (45 Min)',
+      prompt: '__OPEN_PODCAST_MODAL__',
+      highlight: true,
+      color: 'violet',
+      desc: 'Genera un programa completo de 45 minutos (~6,500 palabras) en 6 bloques temáticos, con guión Word .docx, reproductor HTML5 y audio .mp3.'
+    },
     {
       label: '🖼️ Crear Póster de mi Ensayo',
       prompt: '__OPEN_POSTER_MODAL__',
@@ -231,6 +285,8 @@ export default function ChatArea({
 
   const renderToolIcon = (tool) => {
     switch (tool) {
+      case 'create_podcast':
+        return <Headphones size={14} className="text-violet-400" />;
       case 'create_poster':
         return <Presentation size={14} className="text-cyan-400" />;
       case 'create_excel':
@@ -266,6 +322,8 @@ export default function ChatArea({
 
   const renderToolTitle = (tool, params) => {
     switch (tool) {
+      case 'create_podcast':
+        return `Produciendo Podcast (${params.duration || 45} min): ${params.topic || 'Programa de Radio'}`;
       case 'create_poster':
         return `Maquetando Póster Académico: ${params.filename || 'Poster_Academico.html'}`;
       case 'create_excel':
@@ -475,20 +533,28 @@ export default function ChatArea({
               {quickPrompts.map((qp, i) => (
                 <button
                   key={i}
-                  onClick={() =>
-                    qp.prompt === '__OPEN_POSTER_MODAL__'
-                      ? handleLaunchPosterStudio()
-                      : onSendMessage(qp.prompt)
-                  }
+                  onClick={() => {
+                    if (qp.prompt === '__OPEN_POSTER_MODAL__') {
+                      handleLaunchPosterStudio();
+                    } else if (qp.prompt === '__OPEN_PODCAST_MODAL__') {
+                      handleLaunchPodcastStudio();
+                    } else {
+                      onSendMessage(qp.prompt);
+                    }
+                  }}
                   className={`p-3 rounded-xl border text-left transition group shadow-sm ${
-                    qp.highlight
+                    qp.color === 'violet'
+                      ? 'bg-violet-950/30 hover:bg-violet-900/40 border-violet-500/40 hover:border-violet-400'
+                      : qp.highlight
                       ? 'bg-cyan-950/30 hover:bg-cyan-900/40 border-cyan-500/40 hover:border-cyan-400'
                       : 'bg-surface hover:bg-surfaceHover border-border hover:border-slate-700'
                   }`}
                 >
                   <span
                     className={`text-xs font-semibold block mb-1 ${
-                      qp.highlight
+                      qp.color === 'violet'
+                        ? 'text-violet-300 group-hover:text-violet-200'
+                        : qp.highlight
                         ? 'text-cyan-300 group-hover:text-cyan-200'
                         : 'text-slate-200 group-hover:text-blue-400'
                     }`}
@@ -907,6 +973,183 @@ export default function ChatArea({
                 >
                   <Sparkles size={14} />
                   <span>Generar Póster de mi Ensayo</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 45-Minute Podcast Studio Modal */}
+      {showPodcastModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-2xl bg-surface border border-violet-500/40 rounded-2xl shadow-2xl shadow-violet-950/50 overflow-hidden text-xs max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="p-4 bg-gradient-to-r from-violet-950/80 via-slate-900 to-indigo-950/70 border-b border-violet-500/30 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center text-white shadow-md shadow-violet-600/30">
+                  <Headphones size={17} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                    <span>Estudio de Podcast y Radio (45 Minutos)</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/30 font-semibold">
+                      Multi-Bloque 64K
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-violet-200/80">
+                    Genera el guión Word (.docx), reproductor interactivo (.html), pista de audio (.mp3) y escaleta (.md).
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPodcastModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <form onSubmit={handleGeneratePodcastFromModal} className="p-4 overflow-y-auto space-y-3.5 flex-1">
+              {/* Source Document Selection */}
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  1. Documento Base del Proyecto (Opcional — ensayo, reporte o investigación)
+                </label>
+                {essayFilesInProject.length > 0 ? (
+                  <select
+                    value={podcastSourceFile}
+                    onChange={(e) => {
+                      setPodcastSourceFile(e.target.value);
+                      if (e.target.value && !podcastTopic) {
+                        setPodcastTopic(e.target.value.replace(/\.[^.]+$/, '').replace(/_/g, ' '));
+                      }
+                    }}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500"
+                  >
+                    <option value="">-- Sin documento base (crear desde tema libre) --</option>
+                    {essayFilesInProject.map((f, idx) => (
+                      <option key={idx} value={f.name}>
+                        📄 {f.name} {f.size_bytes ? `(${Math.round(f.size_bytes / 1024)} KB)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="text-[11px] text-amber-300/80 bg-amber-950/20 p-2 rounded border border-amber-500/20">
+                    No hay ensayos .docx en este proyecto. Se producirá a partir del tema que ingreses abajo.
+                  </div>
+                )}
+              </div>
+
+              {/* Topic / Title */}
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  2. Tema Central o Título del Episodio
+                </label>
+                <input
+                  type="text"
+                  value={podcastTopic}
+                  onChange={(e) => setPodcastTopic(e.target.value)}
+                  placeholder="Ej. Impacto de la Inteligencia Artificial y Soberanía Tecnológica en 2026..."
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500"
+                />
+              </div>
+
+              {/* Program Name & Duration */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    3. Nombre del Programa
+                  </label>
+                  <input
+                    type="text"
+                    value={podcastShowName}
+                    onChange={(e) => setPodcastShowName(e.target.value)}
+                    placeholder="Ej. Onda Futura"
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    4. Duración Objetivo
+                  </label>
+                  <select
+                    value={podcastDuration}
+                    onChange={(e) => setPodcastDuration(Number(e.target.value))}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500"
+                  >
+                    <option value={45}>🎙️ 45 Minutos (Recomendado • ~6,500 palabras, 6 Bloques)</option>
+                    <option value={30}>⏱️ 30 Minutos (Versión Reducida • ~4,200 palabras)</option>
+                    <option value={60}>📻 60 Minutos (Edición Especial • ~8,500 palabras)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Hosts */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    5. Conductor A (Voz Principal)
+                  </label>
+                  <input
+                    type="text"
+                    value={podcastHostA}
+                    onChange={(e) => setPodcastHostA(e.target.value)}
+                    placeholder="Nombre del primer locutor"
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    6. Conductora B (Co-locutora / Contrapunto)
+                  </label>
+                  <input
+                    type="text"
+                    value={podcastHostB}
+                    onChange={(e) => setPodcastHostB(e.target.value)}
+                    placeholder="Nombre del segundo locutor"
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500"
+                  />
+                </div>
+              </div>
+
+              {/* Tone */}
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  7. Tono y Formato Editorial
+                </label>
+                <select
+                  value={podcastTone}
+                  onChange={(e) => setPodcastTone(e.target.value)}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500"
+                >
+                  <option value="analítico y entretenido">🎙️ Analítico y Entretenido (Ritmo ágil con rigor científico)</option>
+                  <option value="debate apasionado">⚡ Debate Dialéctico (Posturas encontradas con argumentos sólidos)</option>
+                  <option value="divulgación escolar">🎓 Divulgación Escolar y Universitaria (Explicativo y didáctico)</option>
+                  <option value="entrevista profunda">🎙️ Crónica Documental de Radio (Narrativa inmersiva con acotaciones)</option>
+                </select>
+              </div>
+
+              {/* Callout on GPU and 64K context */}
+              <div className="p-2.5 rounded-xl bg-violet-950/30 border border-violet-500/30 text-[11px] text-violet-200 leading-relaxed">
+                🚀 <strong>Arquitectura de Producción de 45 Minutos:</strong> Para evitar que el modelo dé vueltas o se corte por límite de tokens, el sistema divide la emisión en <strong>6 bloques temáticos</strong> estructurados con marcas de tiempo <code>[MM:SS]</code> y acotaciones <code>[SFX]</code>. Utiliza la memoria DDR5 con presets de 64K y acelera la inferencia con tu <strong>GPU NVIDIA RTX 4070 (Flash Attention)</strong>.
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowPodcastModal(false)}
+                  className="px-3.5 py-2 rounded-lg bg-surface hover:bg-surfaceHover text-slate-300 font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-semibold shadow-lg shadow-violet-600/20 flex items-center space-x-1.5"
+                >
+                  <Radio size={14} />
+                  <span>Producir Podcast Completo ({podcastDuration} Min)</span>
                 </button>
               </div>
             </form>

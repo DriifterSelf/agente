@@ -56,10 +56,11 @@ export default function TitleBar({
   const [downloadingModel, setDownloadingModel] = useState(null);
 
   const FALLBACK_PRESETS = [
-    { tokens: 8192, kv_gb: 0.6, location: 'gpu', desc: 'Ultrarrápido • Consultas puntuales' },
-    { tokens: 16384, kv_gb: 1.2, location: 'gpu', desc: 'Rápido • Notas breves y artículos' },
-    { tokens: 32768, kv_gb: 2.4, location: 'gpu', desc: 'Recomendado • PDFs de 50+ págs, Excel y tareas' },
-    { tokens: 40960, kv_gb: 3.0, location: 'ram', desc: 'Máximo Qwen3 (40K) • Documentos densos en DDR5' }
+    { tokens: 8192, kv_gb: 0.6, location: 'gpu', desc: '8K • Consultas puntuales y código rápido' },
+    { tokens: 16384, kv_gb: 1.2, location: 'gpu', desc: '16K • Ensayos medianos y resúmenes ejecutivos' },
+    { tokens: 32768, kv_gb: 2.4, location: 'gpu', desc: '32K • Estándar para PDFs de 50+ págs y Excel' },
+    { tokens: 65536, kv_gb: 4.8, location: 'ram', desc: '64K • Podcasts 45 min, guiones de radio y transcripciones' },
+    { tokens: 131072, kv_gb: 9.6, location: 'ram', desc: '128K Ultra • Libros completos y maratones en 64GB DDR5' }
   ];
 
   const fetchModels = async () => {

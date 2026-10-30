@@ -477,8 +477,9 @@ class InferenceEngine:
 
         if is_moe_30b:
             # Qwen3-30B-A3B (~17.3 GB MoE, 48 capas):
-            # En 8GB VRAM + 64GB DDR5, 15 capas en GPU (~5.2 GB VRAM) + resto y KV en 64GB DDR5 RAM
-            gpu_layers = 15 if self.kv_mode != "ram" else 10
+            # En 8GB VRAM + 64GB DDR5, con Flash Attention (-fa) y KV-cache en RAM (-nkvo),
+            # offloadeamos 24 capas a VRAM para maximizar la GPU RTX 4070 Laptop al 100%
+            gpu_layers = 24 if self.kv_mode != "ram" else 16
             kv_loc = "ram" if self.kv_mode in ("auto", "ram") else "gpu"
         else:
             # Qwen3-8B (~4.68 GB): 100% de las capas caben en 8GB VRAM
@@ -494,6 +495,7 @@ class InferenceEngine:
 
     def _try_launch_llama_server(self, llama_bin: str, model_path: str, filename: str, gpu_layers: int, kv_loc: str) -> bool:
         self.stop()
+        # Aprovechar núcleos de rendimiento de CPU Alienware m18 R2 para procesamiento paralelo
         threads = max(4, min(16, (os.cpu_count() or 8) - 2))
         cmd = [
             llama_bin,
@@ -503,6 +505,9 @@ class InferenceEngine:
             "-c", str(self.n_ctx),
             "-ngl", str(gpu_layers),
             "-t", str(threads),
+            "-b", "2048",   # Saturación de Tensor Cores en RTX 4070
+            "-ub", "512",   # Batching de micro-evaluación rápida
+            "-fa",          # Flash Attention: reduce memoria y acelera 2x-3x la inferencia
         ]
         if kv_loc == "ram":
             cmd.append("-nkvo")
@@ -591,6 +596,7 @@ class InferenceEngine:
                 # Intentar primero con el perfil GPU óptimo; si falla por VRAM insuficiente, probar con menos capas
                 fallback_profiles = [
                     (gpu_layers, kv_loc),
+                    (16, "ram"),
                     (8, "ram"),
                     (0, "ram")
                 ]
@@ -735,10 +741,11 @@ class InferenceEngine:
 
     def context_presets(self):
         return [
-            {"tokens": 8192, "kv_gb": 0.6, "location": "gpu", "desc": "Ultrarrápido • Consultas puntuales"},
-            {"tokens": 16384, "kv_gb": 1.2, "location": "gpu", "desc": "Rápido • Notas breves y artículos"},
-            {"tokens": 32768, "kv_gb": 2.4, "location": self.kv_location, "desc": "Recomendado • PDFs de 50+ págs, Excel y tareas"},
-            {"tokens": 40960, "kv_gb": 3.0, "location": "ram", "desc": "Máximo Qwen3 (40K) • Documentos densos en DDR5"}
+            {"tokens": 8192, "kv_gb": 0.6, "location": "gpu", "desc": "8K • Consultas puntuales y código rápido"},
+            {"tokens": 16384, "kv_gb": 1.2, "location": "gpu", "desc": "16K • Ensayos medianos y resúmenes ejecutivos"},
+            {"tokens": 32768, "kv_gb": 2.4, "location": self.kv_location, "desc": "32K • Estándar para PDFs de 50+ págs y Excel"},
+            {"tokens": 65536, "kv_gb": 4.8, "location": "ram", "desc": "64K • Podcasts 45 min, guiones de radio y transcripciones"},
+            {"tokens": 131072, "kv_gb": 9.6, "location": "ram", "desc": "128K Ultra • Libros completos y maratones en 64GB DDR5"}
         ]
 
     def set_context_config(self, n_ctx: int, kv_mode: str):
@@ -839,6 +846,8 @@ class InferenceEngine:
             "gpu_backend": backend_str,
             "gpu_vram_gb": vram_gb,
             "n_ctx": self.n_ctx,
+            "n_ctx_k": round(self.n_ctx / 1024),
+            "n_ctx_max": 131072,
             "kv_mode": self.kv_mode,
             "kv_location": self.kv_location,
             "context_mem_gb": round((self.n_ctx / 32768) * 2.4, 1),

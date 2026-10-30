@@ -7,6 +7,7 @@ from backend.tools.system_tools import SystemTools
 from backend.tools.office_tools import OfficeTools
 from backend.tools.essay_tools import EssayTools
 from backend.tools.poster_tools import PosterTools
+from backend.tools.podcast_tools import PodcastTools
 from backend.tools.media_tools import MediaTools
 from backend.tools.web_tools import WebTools
 from backend.tools.sandbox_tools import SandboxTools
@@ -135,6 +136,57 @@ class AutonomousAgent:
                 sections=sections
             )
 
+        elif tool_name == "create_podcast":
+            topic = params.get("topic") or params.get("title") or "Innovación y Tecnología"
+            source_file = params.get("source_file", "")
+            duration = int(params.get("duration", 45))
+            hosts = params.get("hosts") or ["Alex", "Elena"]
+            show_name = params.get("show_name", "Onda Futura")
+            spec = PodcastTools.parse_podcast_config(topic, duration)
+            if hosts and len(hosts) >= 2:
+                spec["host_a"] = hosts[0]
+                spec["host_b"] = hosts[1]
+            if show_name:
+                spec["show_name"] = show_name
+            if source_file:
+                spec["source_file"] = source_file
+
+            project_ctx = EssayTools.gather_project_context(project_path)
+            if source_file:
+                for f_name in [source_file, f"{source_file}.docx", f"{source_file}.txt", f"{source_file}.md"]:
+                    f_path = os.path.join(project_path, f_name)
+                    if os.path.exists(f_path):
+                        try:
+                            with open(f_path, "r", encoding="utf-8", errors="ignore") as f:
+                                project_ctx += f"\nContenido del documento base ({f_name}):\n" + f.read()[:5000]
+                            break
+                        except Exception:
+                            pass
+
+            blocks = []
+            for b_spec in PodcastTools.PODCAST_BLOCKS_SPEC:
+                dialogue = PodcastTools.generate_dialogue_fallback(b_spec, spec, project_ctx)
+                blocks.append({
+                    "id": b_spec["id"],
+                    "title": b_spec["title"],
+                    "time_range": b_spec["time_range"],
+                    "approx_minutes": b_spec["approx_minutes"],
+                    "sfx_start": b_spec["sfx_start"],
+                    "dialogue": dialogue
+                })
+
+            docx_path = PodcastTools.export_podcast_docx(project_path, f"{spec['filename_base']}.docx", spec, blocks)
+            html_path = PodcastTools.export_podcast_html_player(project_path, f"{spec['filename_base']}_player.html", spec, blocks)
+            audio_path = PodcastTools.export_podcast_audio(project_path, f"{spec['filename_base']}.mp3", spec, blocks)
+            return {
+                "status": "success",
+                "file": docx_path,
+                "player_file": html_path,
+                "audio_file": audio_path,
+                "total_words": sum(len(b["dialogue"].split()) for b in blocks),
+                "duration_min": duration
+            }
+
         elif tool_name == "create_excel":
             filename = params.get("filename", "Analisis_Datos.xlsx")
             if not filename.endswith(".xlsx"):
@@ -219,21 +271,32 @@ class AutonomousAgent:
                 yield event
             return
 
+        # 0C. Si el usuario solicita un PODCAST (45 min o cualquier duración), activar PodcastTools de transmisión por bloques
+        if PodcastTools.is_podcast_request(last_user_message):
+            for event in PodcastTools.generate_podcast_stream(
+                engine=self.engine,
+                project_path=project_path,
+                prompt_text=last_user_message
+            ):
+                yield event
+            return
+
         system_prompt = (
             "Eres Agente Studio, un asistente autónomo local impulsado por Qwen3 ejecutándose en hardware dedicado.\n"
             f"Espacio de trabajo actual ({os.path.basename(project_path)}):\n{project_context}\n\n"
             "Instrucciones de calidad:\n"
             "- Responde siempre en español de forma exhaustiva, estructurada, técnica y rigurosa. Evita respuestas breves o superficiales.\n"
             "- Cuando expliques un tema o redactes un informe, desarrolla múltiples párrafos profundos con encabezados claros, análisis detallado y ejemplos concretos.\n"
-            "- Si el usuario te pide crear un archivo de Excel (.xlsx), Word (.docx), PowerPoint (.pptx), Póster Académico o código, "
+            "- Si el usuario te pide crear un archivo de Excel (.xlsx), Word (.docx), PowerPoint (.pptx), Póster Académico, Podcast de 45 minutos o código, "
             "primero desarrolla el análisis completo en tu respuesta y al final puedes invocar la herramienta incluyendo un bloque <tool_call>{\"tool\": \"nombre\", \"params\": {...}}</tool_call>.\n"
             "Herramientas disponibles:\n"
-            "1. create_poster: {\"tool\": \"create_poster\", \"params\": {\"topic\": \"Tema o ensayo base\", \"source_file\": \"Ensayo.docx\", \"theme\": \"academic_blue\", \"author\": \"Estudiante\"}}\n"
-            "2. create_essay: {\"tool\": \"create_essay\", \"params\": {\"topic\": \"Tema del ensayo\", \"essay_type\": \"Argumentativo\", \"academic_level\": \"Posgrado\", \"citation_style\": \"APA 7ª Edición\"}}\n"
-            "3. create_excel: {\"tool\": \"create_excel\", \"params\": {\"filename\": \"nombre.xlsx\", \"sheets\": {\"Hoja1\": [[\"Col1\", \"Col2\"], [\"Dato\", 123]]}}}\n"
-            "4. create_word: {\"tool\": \"create_word\", \"params\": {\"filename\": \"nombre.docx\", \"title\": \"Título\", \"sections\": [{\"heading\": \"Sección 1\", \"level\": 1, \"body\": \"Texto extenso...\"}]}}\n"
-            "5. create_powerpoint: {\"tool\": \"create_powerpoint\", \"params\": {\"filename\": \"nombre.pptx\", \"title\": \"Título\", \"slides\": [{\"title\": \"Slide 1\", \"bullets\": [\"Punto 1\", \"Punto 2\"]}]}}\n"
-            "6. write_file: {\"tool\": \"write_file\", \"params\": {\"filename\": \"script.py\", \"content\": \"...\"}}\n"
+            "1. create_podcast: {\"tool\": \"create_podcast\", \"params\": {\"topic\": \"Tema del podcast\", \"duration\": 45, \"hosts\": [\"Alex\", \"Elena\"], \"show_name\": \"Onda Futura\"}}\n"
+            "2. create_poster: {\"tool\": \"create_poster\", \"params\": {\"topic\": \"Tema o ensayo base\", \"source_file\": \"Ensayo.docx\", \"theme\": \"academic_blue\", \"author\": \"Estudiante\"}}\n"
+            "3. create_essay: {\"tool\": \"create_essay\", \"params\": {\"topic\": \"Tema del ensayo\", \"essay_type\": \"Argumentativo\", \"academic_level\": \"Posgrado\", \"citation_style\": \"APA 7ª Edición\"}}\n"
+            "4. create_excel: {\"tool\": \"create_excel\", \"params\": {\"filename\": \"nombre.xlsx\", \"sheets\": {\"Hoja1\": [[\"Col1\", \"Col2\"], [\"Dato\", 123]]}}}\n"
+            "5. create_word: {\"tool\": \"create_word\", \"params\": {\"filename\": \"nombre.docx\", \"title\": \"Título\", \"sections\": [{\"heading\": \"Sección 1\", \"level\": 1, \"body\": \"Texto extenso...\"}]}}\n"
+            "6. create_powerpoint: {\"tool\": \"create_powerpoint\", \"params\": {\"filename\": \"nombre.pptx\", \"title\": \"Título\", \"slides\": [{\"title\": \"Slide 1\", \"bullets\": [\"Punto 1\", \"Punto 2\"]}]}}\n"
+            "7. write_file: {\"tool\": \"write_file\", \"params\": {\"filename\": \"script.py\", \"content\": \"...\"}}\n"
             "/no_think"
         )
 

@@ -11,7 +11,8 @@ import {
   Check,
   Search,
   Video,
-  Music
+  Music,
+  Headphones
 } from 'lucide-react';
 
 export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFolder, activeProject }) {
@@ -21,6 +22,7 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
 
   const getFileBadge = (filename) => {
     const ext = filename.split('.').pop().toLowerCase();
+    const low = filename.toLowerCase();
     switch (ext) {
       case 'xlsx':
       case 'xls':
@@ -33,6 +35,14 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
         };
       case 'docx':
       case 'doc':
+        if (low.includes('podcast')) {
+          return {
+            icon: <Headphones size={16} className="text-violet-400" />,
+            label: 'Guión Podcast (45m)',
+            color: 'bg-violet-500/15 text-violet-300 border-violet-500/40',
+            btnHover: 'hover:bg-violet-600 hover:text-white'
+          };
+        }
         return {
           icon: <FileText size={16} className="text-blue-400" />,
           label: 'Word',
@@ -70,6 +80,14 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
       case 'm4a':
       case 'ogg':
       case 'flac':
+        if (low.includes('podcast')) {
+          return {
+            icon: <Headphones size={16} className="text-violet-400" />,
+            label: 'Podcast Audio (45m)',
+            color: 'bg-violet-500/15 text-violet-300 border-violet-500/40',
+            btnHover: 'hover:bg-violet-600 hover:text-white'
+          };
+        }
         return {
           icon: <Music size={16} className="text-pink-400" />,
           label: 'Audio',
@@ -103,6 +121,14 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
             label: 'Póster A0/PDF',
             color: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40',
             btnHover: 'hover:bg-cyan-600 hover:text-white'
+          };
+        }
+        if (low.includes('podcast') || low.includes('player')) {
+          return {
+            icon: <Headphones size={16} className="text-violet-400" />,
+            label: 'Podcast 45m Player',
+            color: 'bg-violet-500/15 text-violet-300 border-violet-500/40',
+            btnHover: 'hover:bg-violet-600 hover:text-white'
           };
         }
         return {
