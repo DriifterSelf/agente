@@ -51,8 +51,16 @@ function downloadFile(url, dest) {
 
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
+    const headers = {
+      'User-Agent': 'AgenteStudio-Builder/1.0',
+      Accept: 'application/vnd.github+json'
+    };
+    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     https
-      .get(url, { headers: { 'User-Agent': 'AgenteStudio-Builder/1.0', Accept: 'application/vnd.github+json' } }, (res) => {
+      .get(url, { headers }, (res) => {
         if (res.statusCode === 301 || res.statusCode === 302) {
           return fetchJson(res.headers.location).then(resolve).catch(reject);
         }
@@ -75,7 +83,7 @@ function extractZip(zipPath, targetDir) {
     execSync(`tar -xf "${zipPath}" -C "${targetDir}"`, { stdio: 'inherit' });
   } catch (e) {
     execSync(
-      `powershell -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${targetDir}' -Force"`,
+      `powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${targetDir}' -Force"`,
       { stdio: 'inherit' }
     );
   }
@@ -94,23 +102,33 @@ async function prepareLlamaRuntime() {
     }
 
     console.log('[Runtime Bundler] Consultando última versión oficial de ggml-org/llama.cpp para Windows (GPU)...');
-    const release = await fetchJson('https://api.github.com/repos/ggml-org/llama.cpp/releases/latest');
-    const assets = Array.isArray(release.assets) ? release.assets : [];
+    let downloadUrl = null;
+    let assetName = 'llama-bin-win-vulkan-x64.zip';
 
-    // Prefer Vulkan x64 binary (supports both NVIDIA RTX 4070 and AMD RX 9070 XT out-of-the-box without 4GB CUDA redist)
-    let targetAsset =
-      assets.find((a) => /bin-win-vulkan-x64\.zip$/i.test(a.name)) ||
-      assets.find((a) => /bin-win-cuda.*-x64\.zip$/i.test(a.name) && !/cudart/i.test(a.name)) ||
-      assets.find((a) => /bin-win-avx2-x64\.zip$/i.test(a.name));
+    try {
+      const release = await fetchJson('https://api.github.com/repos/ggml-org/llama.cpp/releases/latest');
+      const assets = Array.isArray(release.assets) ? release.assets : [];
 
-    if (!targetAsset || !targetAsset.browser_download_url) {
-      console.log('[Runtime Bundler] No se encontró asset precompilado en la consulta; se descargará bajo demanda al iniciar.');
-      return;
+      const targetAsset =
+        assets.find((a) => /bin-win-vulkan-x64\.zip$/i.test(a.name)) ||
+        assets.find((a) => /bin-win-cuda.*-x64\.zip$/i.test(a.name) && !/cudart/i.test(a.name)) ||
+        assets.find((a) => /bin-win-avx2-x64\.zip$/i.test(a.name));
+
+      if (targetAsset && targetAsset.browser_download_url) {
+        downloadUrl = targetAsset.browser_download_url;
+        assetName = targetAsset.name;
+      }
+    } catch (apiErr) {
+      console.warn('[Runtime Bundler] Aviso consultando API de GitHub, usando URL de respaldo:', apiErr.message);
+    }
+
+    if (!downloadUrl) {
+      downloadUrl = 'https://github.com/ggml-org/llama.cpp/releases/download/b5092/llama-b5092-bin-win-vulkan-x64.zip';
     }
 
     const runtimeZip = path.join(ROOT_DIR, 'llama-runtime.zip');
-    await downloadFile(targetAsset.browser_download_url, runtimeZip);
-    console.log(`[Runtime Bundler] Extrayendo ${targetAsset.name} en ${RUNTIME_DIR}...`);
+    await downloadFile(downloadUrl, runtimeZip);
+    console.log(`[Runtime Bundler] Extrayendo ${assetName} en ${RUNTIME_DIR}...`);
     extractZip(runtimeZip, RUNTIME_DIR);
 
     if (fs.existsSync(runtimeZip)) {
@@ -118,24 +136,22 @@ async function prepareLlamaRuntime() {
     }
 
     // Si el zip extrajo una subcarpeta (ej. build/bin/*), mover ejecutables y DLLs a la raíz de runtime/
-    if (!fs.existsSync(llamaServerExe)) {
-      const findAndFlatten = (dir) => {
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          const fullPath = path.join(dir, entry.name);
-          if (entry.isDirectory()) {
-            findAndFlatten(fullPath);
-          } else if (/\.(exe|dll)$/i.test(entry.name)) {
-            const destPath = path.join(RUNTIME_DIR, entry.name);
-            if (fullPath !== destPath && !fs.existsSync(destPath)) {
-              fs.copyFileSync(fullPath, destPath);
-            }
+    const findAndFlatten = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          findAndFlatten(fullPath);
+        } else if (/\.(exe|dll)$/i.test(entry.name)) {
+          const destPath = path.join(RUNTIME_DIR, entry.name);
+          if (fullPath !== destPath) {
+            fs.copyFileSync(fullPath, destPath);
           }
         }
-      };
-      findAndFlatten(RUNTIME_DIR);
-    }
+      }
+    };
+    findAndFlatten(RUNTIME_DIR);
 
-    console.log('[Runtime Bundler] Motor nativo llama-server.exe preparado correctamente.');
+    console.log('[Runtime Bundler] Motor nativo llama-server.exe y DLLs GPU preparados correctamente.');
   } catch (err) {
     console.warn('[Runtime Bundler] Aviso al preparar llama-server.exe (se descargará bajo demanda en la app):', err.message);
   }

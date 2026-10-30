@@ -590,7 +590,7 @@ class InferenceEngine:
             self.engine_message = f"Falta runtime/llama-server.exe para iniciar {filename}"
             return {"status": "error", "model": filename, "message": self.engine_message}
 
-    def generate_stream(self, messages: List[Dict[str, str]], max_tokens: int = 2048, temperature: float = 0.6):
+    def generate_stream(self, messages: List[Dict[str, str]], max_tokens: int = 4096, temperature: float = 0.6):
         """
         Genera tokens en streaming desde llama-server.exe (puerto 8081).
         Si el modelo está terminando de cargarse en RAM/VRAM, espera automáticamente a que esté listo.

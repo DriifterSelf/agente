@@ -51,12 +51,11 @@ export default function ChatArea({
   const [copiedIndex, setCopiedIndex] = useState(null);
   const [editingTabId, setEditingTabId] = useState(null);
   const [editingTabTitle, setEditingTabTitle] = useState('');
-  
+
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  // Auto-scroll only when appropriate
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -65,7 +64,6 @@ export default function ChatArea({
     scrollToBottom();
   }, [messages, currentStreamContent, activeActions]);
 
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -79,7 +77,7 @@ export default function ChatArea({
     if ((input.trim() || attachments.length > 0) && !isStreaming) {
       let finalPrompt = input.trim();
       if (attachments.length > 0) {
-        const attachInfo = attachments.map(a => `[Archivo adjunto: "${a.name}"]`).join(', ');
+        const attachInfo = attachments.map((a) => `[Archivo adjunto: "${a.name}"]`).join(', ');
         finalPrompt = `${attachInfo}\n\n${finalPrompt || 'Por favor procesa y analiza estos archivos adjuntos.'}`;
       }
       onSendMessage(finalPrompt);
@@ -129,7 +127,7 @@ export default function ChatArea({
     try {
       const res = await onUploadFile(file);
       if (res && res.status === 'success') {
-        setAttachments(prev => [...prev, { name: file.name, size: file.size, type: file.type }]);
+        setAttachments((prev) => [...prev, { name: file.name, size: file.size, type: file.type }]);
       }
     } catch (err) {
       console.error('Error uploading file:', err);
@@ -137,7 +135,7 @@ export default function ChatArea({
   };
 
   const removeAttachment = (index) => {
-    setAttachments(prev => prev.filter((_, i) => i !== index));
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
   const toggleAction = (idx) => {
@@ -152,12 +150,30 @@ export default function ChatArea({
   };
 
   const quickPrompts = [
-    { label: '📊 Excel Financiero', prompt: 'Crea un archivo Excel con el presupuesto anual detallado, fórmulas de sumatoria y margen, y un gráfico comparativo.' },
-    { label: '📄 Informe Ejecutivo Word', prompt: 'Redacta un informe ejecutivo profesional en Word sobre la estrategia de operaciones y eficiencia para este trimestre.' },
-    { label: '📑 Presentación PowerPoint', prompt: 'Crea una presentación de PowerPoint de 6 diapositivas con portada, pilares estratégicos y conclusiones clave.' },
-    { label: '🎓 Tarea / Resumen Académico', prompt: 'Analiza los documentos de mi tarea y genera un reporte estructurado en Word con los conceptos clave, fórmulas y soluciones.' },
-    { label: '🎙️ Audio Narrado MP3', prompt: 'Genera un archivo de audio MP3 narrando una síntesis ejecutiva con voz neuronal clara.' },
-    { label: '🌐 Búsqueda e Investigación', prompt: 'Investiga en la web las últimas tendencias de tecnología y negocios, y hazme un resumen estructurado.' }
+    {
+      label: '📊 Excel Financiero',
+      prompt: 'Crea un archivo Excel con el presupuesto anual detallado, fórmulas de sumatoria y margen, y un gráfico comparativo.'
+    },
+    {
+      label: '📄 Informe Ejecutivo Word',
+      prompt: 'Redacta un informe ejecutivo profesional en Word sobre la estrategia de operaciones y eficiencia para este trimestre.'
+    },
+    {
+      label: '📑 Presentación PowerPoint',
+      prompt: 'Crea una presentación de PowerPoint de 6 diapositivas con portada, pilares estratégicos y conclusiones clave.'
+    },
+    {
+      label: '🎓 Ensayo / Análisis Académico',
+      prompt: 'Redacta un ensayo académico profundo y riguroso con introducción, marco teórico, desarrollo argumentativo, contraargumentos, conclusiones y referencias APA 7.'
+    },
+    {
+      label: '🎙️ Audio Narrado MP3',
+      prompt: 'Genera un archivo de audio MP3 narrando una síntesis ejecutiva con voz neuronal clara.'
+    },
+    {
+      label: '🌐 Búsqueda e Investigación',
+      prompt: 'Investiga en la web las últimas tendencias de tecnología y negocios, y hazme un resumen estructurado.'
+    }
   ];
 
   const renderToolIcon = (tool) => {
@@ -165,6 +181,7 @@ export default function ChatArea({
       case 'create_excel':
         return <FileSpreadsheet size={14} className="text-emerald-400" />;
       case 'create_word':
+      case 'create_essay':
         return <FileText size={14} className="text-blue-400" />;
       case 'create_powerpoint':
         return <Presentation size={14} className="text-amber-400" />;
@@ -197,7 +214,8 @@ export default function ChatArea({
       case 'create_excel':
         return `Generando Excel: ${params.filename || 'Libro.xlsx'}`;
       case 'create_word':
-        return `Redactando Word: ${params.filename || 'Documento.docx'}`;
+      case 'create_essay':
+        return `Redactando Word: ${params.filename || 'Ensayo.docx'}`;
       case 'create_powerpoint':
         return `Creando PowerPoint: ${params.filename || 'Presentacion.pptx'}`;
       case 'create_pdf':
@@ -391,7 +409,7 @@ export default function ChatArea({
                 ¿En qué puedo ayudarte hoy?
               </h2>
               <p className="text-sm text-slate-400 mt-1.5 leading-relaxed">
-                Asistente autónomo multimodal. Crea o procesa cualquier documento (Word, Excel, PowerPoint, PDF), imágenes, gráficos, audio, video o tareas en Windows.
+                Asistente autónomo multimodal. Crea o procesa cualquier documento (Word, Excel, PowerPoint, PDF), ensayos profundos, imágenes, gráficos, audio, video o tareas en Windows.
               </p>
             </div>
 

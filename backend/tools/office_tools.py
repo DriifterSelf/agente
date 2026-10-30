@@ -28,19 +28,47 @@ class OfficeTools:
     @staticmethod
     def create_word(project_path: str, filename: str, title: str, sections: list):
         try:
+            import re
             import docx
+            from docx.shared import Pt, Inches
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+
             doc = docx.Document()
+            for s in doc.sections:
+                s.top_margin = Inches(1.0)
+                s.bottom_margin = Inches(1.0)
+                s.left_margin = Inches(1.0)
+                s.right_margin = Inches(1.0)
+
             doc.add_heading(title, 0)
             for sec in sections:
                 if isinstance(sec, dict):
                     h = sec.get("heading")
                     if h:
                         doc.add_heading(h, level=sec.get("level", 1))
-                    b = sec.get("body")
+                    b = sec.get("body", "")
                     if b:
-                        doc.add_paragraph(b)
-                elif isinstance(sec, str):
-                    doc.add_paragraph(sec)
+                        for para_block in [p.strip() for p in re.split(r"\n\s*\n", str(b)) if p.strip()]:
+                            p = doc.add_paragraph()
+                            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                            p.paragraph_format.line_spacing = 1.35
+                            p.paragraph_format.space_after = Pt(8)
+                            tokens = re.split(r"(\*\*[^*]+\*\*|\*[^*]+\*)", para_block)
+                            for tok in tokens:
+                                if not tok:
+                                    continue
+                                if tok.startswith("**") and tok.endswith("**") and len(tok) > 4:
+                                    r = p.add_run(tok[2:-2])
+                                    r.bold = True
+                                elif tok.startswith("*") and tok.endswith("*") and len(tok) > 2:
+                                    r = p.add_run(tok[1:-1])
+                                    r.italic = True
+                                else:
+                                    p.add_run(tok)
+                elif isinstance(sec, str) and sec.strip():
+                    p = doc.add_paragraph(sec.strip())
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                    p.paragraph_format.line_spacing = 1.35
             target = os.path.join(project_path, filename)
             doc.save(target)
             return {"status": "success", "file": target}

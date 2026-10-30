@@ -57,8 +57,14 @@ jobs:
           }
 
       - name: 📦 Empaquetar e integrar binarios de Python (3.11 Portable) y Runtime GPU
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npm run prepare:python
+
+      - name: ✅ Validar sintaxis de Python y binarios antes de empaquetar
+        run: |
+          python -m compileall -q backend
 
       - name: 🔨 Compilar Frontend (Vite)
         run: |
