@@ -424,12 +424,85 @@ app.post('/api/projects/:name/open-folder', (req: Request, res: Response) => {
 });
 
 // 12. Open / Download / Preview file
+app.get('/api/tts-line', (req: Request, res: Response) => {
+  const text = String(req.query.text || '');
+  const gender = String(req.query.gender || 'male');
+  try {
+    const pyCode = [
+      'import sys, os; sys.path.insert(0, os.getcwd());',
+      'from backend.tools.podcast_player_template import synthesize_single_line_audio;',
+      'data, mime = synthesize_single_line_audio(sys.argv[1], sys.argv[2]);',
+      'sys.stdout.buffer.write(data)'
+    ].join(' ');
+    const audioBuf = execSync(
+      `python3 -c "${pyCode}" ${JSON.stringify(text)} ${JSON.stringify(gender)}`,
+      { cwd: __dirname, maxBuffer: 15 * 1024 * 1024, timeout: 20000 }
+    );
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(audioBuf);
+  } catch (err) {
+    return res.status(500).send('TTS error');
+  }
+});
+
+app.post('/api/projects/:name/export-podcast-mp3', (req: Request, res: Response) => {
+  const cleanName = path.basename(req.params.name.trim());
+  const targetDir = path.join(PROJECTS_DIR, cleanName);
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+  try {
+    const pyCode = [
+      'import sys, os, json; sys.path.insert(0, os.getcwd());',
+      'from backend.tools.podcast_tools import PodcastTools;',
+      'res = PodcastTools.reexport_project_podcast(sys.argv[1]);',
+      'print(json.dumps(res, ensure_ascii=False))'
+    ].join(' ');
+    const out = execSync(
+      `python3 -c "${pyCode}" ${JSON.stringify(targetDir)}`,
+      { cwd: __dirname, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024, timeout: 120000 }
+    );
+    const parsed = JSON.parse(out.trim().split('\n').pop() || '{}');
+    return res.json(parsed);
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+app.get('/api/projects/:name/download/:filename', (req: Request, res: Response) => {
+  const cleanName = path.basename(req.params.name.trim());
+  const safeFn = path.basename(req.params.filename.trim());
+  const fullP = path.join(PROJECTS_DIR, cleanName, safeFn);
+  if (fs.existsSync(fullP)) {
+    return res.download(fullP, safeFn);
+  }
+  return res.status(404).send('Archivo no encontrado');
+});
+
 app.post('/api/system/open-file', (req: Request, res: Response) => {
   const filePath = req.body?.path;
   if (!filePath) return res.status(400).json({ error: 'Ruta no especificada' });
-  
+
   const fileName = path.basename(filePath);
   const ext = path.extname(fileName).toLowerCase();
+
+  // Auto-upgrade old silent podcast HTML players when opened
+  if (fs.existsSync(filePath) && ext === '.html' && fileName.toLowerCase().includes('podcast')) {
+    try {
+      const currHtml = fs.readFileSync(filePath, 'utf-8');
+      if (!currHtml.includes('exportPodcastMp3Again') || !currHtml.includes('_playViaServerTts')) {
+        const projDir = path.dirname(filePath);
+        const pyCode = [
+          'import sys, os; sys.path.insert(0, os.getcwd());',
+          'from backend.tools.podcast_tools import PodcastTools;',
+          'PodcastTools.reexport_project_podcast(sys.argv[1])'
+        ].join(' ');
+        execSync(`python3 -c "${pyCode}" ${JSON.stringify(projDir)}`, { cwd: __dirname, timeout: 60000 });
+      }
+    } catch (e) {}
+  }
+
   let contentPreview = '';
   if (fs.existsSync(filePath) && /\.(html|svg|md|txt|csv|json|py|js|jsx|ts|tsx|docx|pptx|xlsx|pdf)$/i.test(ext)) {
     try {
@@ -454,6 +527,8 @@ app.get('/api/files/raw', (req: Request, res: Response) => {
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.html') res.setHeader('Content-Type', 'text/html; charset=utf-8');
     else if (ext === '.svg') res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    else if (ext === '.mp3') res.setHeader('Content-Type', 'audio/mpeg');
+    else if (ext === '.wav') res.setHeader('Content-Type', 'audio/wav');
     else res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     return res.send(fs.readFileSync(filePath));
   }
@@ -2029,582 +2104,20 @@ ${podcastJsonData}
 
     fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
 
-    // 4. Write real audio file with radio intro fanfare, chimes and broadcast tones
+    // 4. Synthesize full dual-voice + SFX MP3 and updated HTML player via PodcastTools
     try {
-      const sampleRate = 22050;
-      const durationSecs = 10;
-      const numSamples = sampleRate * durationSecs;
-      const dataSize = numSamples * 2;
-      const wavBuffer = Buffer.alloc(44 + dataSize);
-
-      wavBuffer.write("RIFF", 0);
-      wavBuffer.writeUInt32LE(36 + dataSize, 4);
-      wavBuffer.write("WAVE", 8);
-      wavBuffer.write("fmt ", 12);
-      wavBuffer.writeUInt32LE(16, 16);
-      wavBuffer.writeUInt16LE(1, 20);
-      wavBuffer.writeUInt16LE(1, 22);
-      wavBuffer.writeUInt32LE(sampleRate, 24);
-      wavBuffer.writeUInt32LE(sampleRate * 2, 28);
-      wavBuffer.writeUInt16LE(2, 32);
-      wavBuffer.writeUInt16LE(16, 34);
-      wavBuffer.write("data", 36);
-      wavBuffer.writeUInt32LE(dataSize, 40);
-
-      const chordFreqs = [261.63, 329.63, 392.00, 523.25];
-      for (let i = 0; i < numSamples; i++) {
-        const t = i / sampleRate;
-        let sampleVal = 0;
-        if (t < 3.5) {
-          const chordIdx = Math.min(3, Math.floor(t / (3.5 / 4.0)));
-          const f = chordFreqs[chordIdx];
-          sampleVal = 0.28 * Math.sin(2.0 * Math.PI * f * t);
-          sampleVal += 0.12 * Math.sin(4.0 * Math.PI * f * t);
-          const stepT = t % (3.5 / 4.0);
-          sampleVal += 0.25 * Math.sin(2.0 * Math.PI * 90.0 * stepT) * Math.exp(-stepT * 12.0);
-        } else {
-          const tBody = t - 3.5;
-          const ambient = 0.04 * Math.sin(2.0 * Math.PI * 220.0 * tBody);
-          const chime = 0.15 * Math.sin(2.0 * Math.PI * 880.0 * tBody) * Math.exp(-tBody * 2.0);
-          sampleVal = ambient + chime;
-        }
-        const valInt = Math.floor(32767 * Math.max(-1.0, Math.min(1.0, sampleVal)));
-        wavBuffer.writeInt16LE(valInt, 44 + i * 2);
-      }
-
-      fs.writeFileSync(mp3Path, wavBuffer);
-    } catch(e) {
-      console.warn("Error synthesizing audio wav in server.ts:", e);
+      const pyCode = [
+        'import sys, os; sys.path.insert(0, os.getcwd());',
+        'from backend.tools.podcast_tools import PodcastTools;',
+        'PodcastTools.reexport_project_podcast(sys.argv[1])'
+      ].join(' ');
+      execSync(`python3 -c "${pyCode}" ${JSON.stringify(projectPath)}`, {
+        cwd: __dirname,
+        timeout: 90000
+      });
+    } catch (e) {
+      console.warn("Error synthesizing podcast audio via python:", e);
     }
-    return {
-      status: 'success',
-      file_name: htmlFileName,
-      full_path: htmlPath,
-      svg_file: svgFileName,
-      message: `Póster Académico ${htmlFileName} y versión vectorial ${svgFileName} creados con éxito.`
-    };
-  }
-
-  // 9C. create_podcast (45-Minute Professional Radio & Podcast Production Engine)
-  if (tool === 'create_podcast') {
-    const topic = rawParams.topic || rawParams.title || 'Innovación, Tecnología y Futuro';
-    const duration = Number(rawParams.duration) || 45;
-    const showName = rawParams.show_name || 'Onda Futura';
-    const hosts = Array.isArray(rawParams.hosts) && rawParams.hosts.length >= 2 ? rawParams.hosts : ['Alex', 'Elena'];
-    const hostA = hosts[0];
-    const hostB = hosts[1];
-
-    const slug = (rawParams.filename || `Podcast_${duration}min_${topic}`)
-      .replace(/\.[^.]+$/, '')
-      .replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+/g, '_')
-      .slice(0, 42)
-      .replace(/^_|_$/g, '') || `Podcast_${duration}min`;
-
-    const docxName = `${slug}.docx`;
-    const htmlName = `${slug}_player.html`;
-    const mp3Name = `${slug}.mp3`;
-    const mdName = `${slug}_escaleta.md`;
-
-    const docxPath = path.join(projectPath, docxName);
-    const htmlPath = path.join(projectPath, htmlName);
-    const mp3Path = path.join(projectPath, mp3Name);
-    const mdPath = path.join(projectPath, mdName);
-
-    const blocksSpec = [
-      {
-        id: 'bloque_1',
-        title: 'Bloque 1: Introducción y Planteamiento del Tema',
-        time_range: '00:00 - 05:00',
-        approx_minutes: 5,
-        sfx_start: 'Cortinilla musical en fade in con sintetizador rítmico y percusión suave (0:00 - 0:15)',
-        summary: 'Apertura del programa, presentación del tema central, anécdota de apertura y delimitación del debate.'
-      },
-      {
-        id: 'bloque_2',
-        title: 'Bloque 2: Fundamentos y Marco Conceptual',
-        time_range: '05:00 - 14:00',
-        approx_minutes: 9,
-        sfx_start: 'Puente musical de transición técnica, tono analítico bajo (5:00 - 5:10)',
-        summary: 'Explicación didáctica de los conceptos clave, evolución histórica y análisis de la literatura.'
-      },
-      {
-        id: 'bloque_3',
-        title: 'Bloque 3: Debate Central y Casos de Estudio',
-        time_range: '14:00 - 24:00',
-        approx_minutes: 10,
-        sfx_start: 'Golpe de efecto dramático con sintetizador pulsante (14:00 - 14:08)',
-        summary: 'Discusión enérgica entre conductores con posturas contrapuestas y ejemplos reales de la industria.'
-      },
-      {
-        id: 'bloque_4',
-        title: 'Bloque 4: Dilemas Críticos, Riesgos y Controversias',
-        time_range: '24:00 - 33:00',
-        approx_minutes: 9,
-        sfx_start: 'Fondo de tensión moderada con pads atmosféricos (24:00 - 24:12)',
-        summary: 'Riesgos éticos, costos ocultos, sesgos y preguntas difíciles para la comunidad científica.'
-      },
-      {
-        id: 'bloque_5',
-        title: 'Bloque 5: Prospectiva, Innovación y Futuro',
-        time_range: '33:00 - 41:00',
-        approx_minutes: 8,
-        sfx_start: 'Arpegio futurista ascendente en crescendo (33:00 - 33:10)',
-        summary: 'Tendencias a 5-10 años, tecnologías emergentes y escenarios de transformación.'
-      },
-      {
-        id: 'bloque_6',
-        title: 'Bloque 6: Conclusiones, Recomendaciones y Despedida',
-        time_range: '41:00 - 45:00',
-        approx_minutes: 4,
-        sfx_start: 'Tema de cierre principal en fade in progresivo (41:00 - 41:15)',
-        summary: 'Recapitulación de aprendizajes, mensaje inspirador, créditos y despedida de los conductores.'
-      }
-    ];
-
-    // Build extensive scripted dialogue (~6,500 words total across 6 blocks)
-    const blockDialogues: Array<{ spec: any; dialogue: string }> = blocksSpec.map((b, idx) => {
-      let dialogue = '';
-      if (idx === 0) {
-        dialogue = `[00:00] [SFX: ${b.sfx_start}]
-[00:15] [LOCUTOR ${hostA}]: ¡Muy bienvenidos a un nuevo episodio especial de "${showName}"! Les saluda ${hostA}, transmitiendo en alta fidelidad. Hoy tenemos por delante una emisión de 45 minutos completamente dedicada a desmenuzar un tema apasionante: "${topic}". Si nos escuchas mientras conduces, haces ejercicio o trabajas en tu taller, prepárate, porque hoy vamos a ir mucho más allá de los titulares superficiales.
-
-[00:52] [LOCUTOR ${hostB}]: ¡Hola a todos! Qué gusto acompañarte, ${hostA}, y un cálido saludo a toda nuestra audiencia. Este episodio lo veníamos preparando desde hace semanas. Cuando revisábamos las notas preliminares sobre "${topic}", nos dimos cuenta de que existe una brecha gigantesca entre lo que la opinión pública asume y lo que los especialistas en el terreno realmente están experimentando día a día.
-
-[01:34] [LOCUTOR ${hostA}]: Totalmente de acuerdo, ${hostB}. Frecuentemente nos encontramos con dos extremos simplistas: por un lado, un tecno-optimismo ingenuo que promete que todo se solucionará mágicamente; y por el otro, un catastrofismo apocalíptico que paraliza la discusión. Hoy queremos situarnos en el centro riguroso: entender qué es verdad, qué es mito y cuáles son los números reales.
-
-[02:15] [LOCUTOR ${hostB}]: Para que nuestros oyentes tengan el mapa de ruta de estos 45 minutos: en el primer tramo estableceremos las definiciones operacionales clave para que nadie se quede atrás. Posteriormente, entraremos en nuestro bloque de debate central analizando tres casos empíricos de alto impacto. Más adelante, abordaremos las controversias éticas y técnicas más ásperas, para concluir con una proyección a 2035 y consejos prácticos.
-
-[03:05] [LOCUTOR ${hostA}]: Así es. Y como siempre en "${showName}", no estamos aquí para convencerte de un dogma, sino para darte los datos y argumentos para que saques tus propias conclusiones. Ajusta el volumen, porque arrancamos con la base conceptual de "${topic}".
-
-[03:50] [LOCUTOR ${hostB}]: Excelente punto de partida. Antes de adentrarnos en la teoría, quiero dejar una pregunta resonando en la mente de quienes nos escuchan: si tuvieras que explicarle a alguien en dos minutos por qué este asunto cambiará las reglas del juego de tu profesión o de tu vida diaria, ¿por dónde empezarías?
-
-[04:35] [LOCUTOR ${hostA}]: Esa es la clave, ${hostB}. Vamos con la primera cortinilla de transición y entramos de lleno en los cimientos conceptuales.`;
-      } else if (idx === 1) {
-        dialogue = `[05:00] [SFX: ${b.sfx_start}]
-[05:10] [LOCUTOR ${hostA}]: Estamos en el Bloque 2 de "${showName}". Para comprender la magnitud de "${topic}", tenemos que remontarnos a sus antecedentes estructurales. Muchas personas creen que este fenómeno surgió espontáneamente el año pasado, pero la realidad histórica nos muestra una acumulación metódica de avances durante más de una década.
-
-[05:58] [LOCUTOR ${hostB}]: Exactamente, ${hostA}. Si analizamos los papers fundacionales y la literatura especializada, observamos tres vectores concurrentes: primero, la maduración de arquitecturas de procesamiento distribuido; segundo, la disponibilidad masiva de conjuntos de datos estandarizados; y tercero, una optimización algorítmica radical que redujo los costos de cómputo en varios órdenes de magnitud.
-
-[06:50] [LOCUTOR ${hostA}]: Me interesa profundizar en ese tercer vector. Cuando hablamos de optimización algorítmica, nos referimos a cómo se logran resultados iguales o superiores utilizando una fracción de la memoria y el ancho de banda. En términos sencillos para nuestra audiencia: es como haber pasado de necesitar una central eléctrica para iluminar una casa a usar bombillas LED ultrarrápidas y de bajísimo consumo.
-
-[07:45] [LOCUTOR ${hostB}]: Es una analogía muy gráfica, ${hostA}. Y esto se conecta directamente con el concepto de soberanía y accesibilidad. Históricamente, las herramientas más avanzadas relacionadas con "${topic}" estaban restringidas a consorcios multinacionales o laboratorios universitarios con presupuestos millonarios. Lo que presenciamos en la actualidad es una democratización de capacidades sin precedentes históricos.
-
-[08:40] [LOCUTOR ${hostA}]: Permíteme hacer una pausa ahí, ${hostB}, porque este es el corazón del argumento. Cuando la capacidad técnica se descentraliza, las dinámicas de poder cambian. Un investigador independiente, un estudiante o una pequeña empresa en cualquier rincón de nuestra región puede hoy ejecutar procesos que antes exigían infraestructura de supercómputo.
-
-[09:35] [LOCUTOR ${hostB}]: Por supuesto. Sin embargo, también debemos precisar los límites. La democratización del acceso no equivale automáticamente a la comprensión metodológica. Tener a disposición una herramienta de alta potencia sin el criterio epistémico para interpretar sus resultados suele derivar en lo que los sociólogos llaman 'ilusión de competencia': la falsa creencia de que operar una interfaz intuitiva equivale a dominar la disciplina subyacente.
-
-[10:30] [LOCUTOR ${hostA}]: ¡Qué lucidez en esa observación! De hecho, en las encuestas académicas recientes, se detectó que más del 68% de los profesionales reportan haber adoptado estas tecnologías, pero menos del 25% comprende los principios de validación estadística y verificación cruzada de fuentes.
-
-[11:25] [LOCUTOR ${hostB}]: Ese déficit formativo es justamente la causa de los errores más notorios que vemos en los medios de comunicación y en las implementaciones corporativas apresuradas. Por eso insistimos tanto en que la formación crítica debe acompañar a cada salto tecnológico.
-
-[12:20] [LOCUTOR ${hostA}]: En el siguiente bloque vamos a poner a prueba estos fundamentos contrastándolos con casos empíricos reales. Analizaremos una implementación exitosa, un caso de fracaso estrepitoso por falta de rigor, y un modelo híbrido innovador.
-
-[13:15] [LOCUTOR ${hostB}]: Preparen sus libretas de apuntes, porque lo que viene a continuación desmonta varios mitos comerciales de la industria. Vamos a una breve pausa técnica y volvemos con el debate central en "${showName}".`;
-      } else if (idx === 2) {
-        dialogue = `[14:00] [SFX: ${b.sfx_start}]
-[14:10] [LOCUTOR ${hostA}]: Regresamos a "${showName}" en nuestro Bloque 3: Debate Central y Casos de Estudio en torno a "${topic}". Aquí es donde la teoría se encuentra con la realidad cotidiana de las organizaciones y los profesionales. ${hostB}, tienes en la mesa el primer caso de análisis. ¿Por qué este ejemplo es tan revelador?
-
-[14:55] [LOCUTOR ${hostB}]: Porque ilustra de forma transparente el principio de eficiencia marginal. Se trata de una institución que decidió modernizar sus procesos operativos integrando soluciones de análisis profundo. Inicialmente proyectaron un ahorro de tiempo del 40%, pero tras los primeros tres meses se toparon con un obstáculo insospechado: la sobrecarga de información no estructurada.
-
-[15:50] [LOCUTOR ${hostA}]: La temida parálisis por análisis. Los equipos recibían tantos reportes automáticos y tantas métricas divergentes que la toma de decisiones se volvió más lenta en lugar de acelerarse. ¿Cómo resolvieron ese cuello de botella?
-
-[16:45] [LOCUTOR ${hostB}]: La solución no fue tecnológica, sino epistemológica y organizativa. Establecieron lo que denominaron 'filtros de relevancia de doble vía': en lugar de procesar cada dato disponible, definieron tres preguntas rectoras obligatorias antes de cualquier ciclo de trabajo. La regla era simple: si un informe no respondía directamente a una de esas tres preguntas, se descartaba automáticamente.
-
-[17:40] [LOCUTOR ${hostA}]: Esa disciplina de síntesis es vital. Y contrasta enormemente con el segundo caso que investigamos: una organización que intentó reemplazar el juicio humano calificado con automatizaciones rígidas. El resultado fue una degradación de la calidad del servicio del 32% y una pérdida masiva de credibilidad ante sus usuarios en menos de un semestre.
-
-[18:35] [LOCUTOR ${hostB}]: Ese segundo caso nos deja una lección indeleble: las herramientas de cálculo y análisis son amplificadores del criterio humano, no sustitutos del pensamiento reflexivo. Si multiplicas cero criterio por mil herramientas avanzadas, el resultado sigue siendo cero.
-
-[19:30] [LOCUTOR ${hostA}]: ¡Brillante formulación! Ahora hablemos del tercer modelo, el caso de arquitectura híbrida. En este caso, el flujo de trabajo combina la velocidad algorítmica para la fase de exploración y rastreo de patrones, con un comité de revisión colegiada para la toma de decisiones finales. ¿Qué métricas de desempeño alcanzaron?
-
-[20:25] [LOCUTOR ${hostB}]: Lograron reducir los tiempos de ciclo en un 55%, mientras que los índices de consistencia metodológica y satisfacción de los usuarios aumentaron en un 41%. Lo más interesante es que el equipo humano reportó sentirse menos alienado y con mayor espacio para la creatividad estratégica y el diseño de soluciones innovadoras.
-
-[21:20] [LOCUTOR ${hostA}]: Esto demuestra empíricamente que la verdadera ventaja competitiva y académica no radica en acumular infraestructura computacional pasiva, sino en articular flujos de trabajo inteligentes donde cada actor —humano y máquina— opere en su zona de máxima fortaleza.
-
-[22:15] [LOCUTOR ${hostB}]: Completamente de acuerdo, ${hostA}. La máquina aporta velocidad de cálculo, exhaustividad en el rastreo y consistencia en el procesamiento de datos masivos. El humano aporta contexto cultural, sensibilidad ética, discernimiento valorativo y capacidad para improvisar ante lo inédito.
-
-[23:10] [LOCUTOR ${hostA}]: Qué gran síntesis para cerrar nuestro tercer bloque. Al volver de la pausa, entraremos en el terreno más polémico de nuestra emisión: los dilemas éticos, los sesgos algorítmicos y las controversias no resueltas de "${topic}". Quédate con nosotros en "${showName}".`;
-      } else if (idx === 3) {
-        dialogue = `[24:00] [SFX: ${b.sfx_start}]
-[24:12] [LOCUTOR ${hostA}]: Estamos en el Bloque 4 de "${showName}". Entramos en la zona crítica: dilemas éticos, riesgos no advertidos y controversias latentes en torno a "${topic}". ${hostB}, en los debates públicos suele rehuirse a estas preguntas incómodas, pero un análisis riguroso de 45 minutos no puede pasarlas por alto.
-
-[24:58] [LOCUTOR ${hostB}]: Así es, ${hostA}. El primer dilema que debemos poner sobre la mesa es el de la transparencia algorítmica y la caja negra. Cuando un sistema complejo recomienda una decisión financiera, médica, jurídica o académica, ¿cómo auditamos la cadena causal que condujo a esa conclusión? Si no podemos explicar el por qué, ¿hasta qué punto es legítimo apoyarse en ella?
-
-[25:52] [LOCUTOR ${hostA}]: Ese es el principio de explicabilidad. Y se agrava con el problema de los sesgos históricos incrustados en los datos de entrenamiento. Si alimentamos un modelo con diez años de registros históricos que reflejan discriminaciones o asimetrías del pasado, el sistema aprenderá a reproducir esas asimetrías con una pátina de objetividad matemática.
-
-[26:48] [LOCUTOR ${hostB}]: Lo peligroso de la pátina matemática es que desactiva la sospecha crítica. Mucha gente tiende a aceptar una cifra o un veredicto algorítmico porque 'lo dice un modelo', olvidando que los modelos no son oráculos divinos, sino aproximaciones estadísticas diseñadas por seres humanos con supuestos e intereses particulares.
-
-[27:44] [LOCUTOR ${hostA}]: Otro punto álgido: la privacidad y la soberanía de los datos. Durante años se normalizó la práctica de enviar información sensible, archivos confidenciales y proyectos escolares o profesionales a servidores remotos sin garantías claras de custodia. Es precisamente por eso que la ejecución local en hardware propio —usando la memoria y la GPU del usuario— ha cobrado tanta relevancia ética y operativa en los últimos meses.
-
-[28:40] [LOCUTOR ${hostB}]: ¡Ese cambio de paradigma es monumental! Procesar localmente devuelve el control de los datos al creador. Tus borradores, tus tesis, tus hojas de balance y tus códigos fuente no viajan por la nube ni alimentan modelos comerciales ajenos. Permanecen bajo la soberanía exclusiva de tu equipo.
-
-[29:35] [LOCUTOR ${hostA}]: Y a eso sumemos el costo ecológico y energético. El consumo eléctrico de los macrocentros de datos globales está alcanzando niveles insostenibles. En cambio, optimizar modelos eficientes para correr en tarjetas gráficas personales como las RTX de última generación reduce la huella de carbono de forma radical.
-
-[30:30] [LOCUTOR ${hostB}]: Claro está, la ejecución local también exige responsabilidad técnica: el usuario debe gestionar sus recursos, entender la memoria RAM y VRAM disponible, y configurar parámetros adecuados de contexto para no saturar su hardware. Pero la curva de aprendizaje se compensa con creces con la privacidad y la autonomía obtenidas.
-
-[31:25] [LOCUTOR ${hostA}]: Es el precio de la libertad digital: exige mayor rigor y criterio, pero te libera de la dependencia de plataformas monopólicas que pueden cambiar sus términos de servicio o suspenderte la cuenta de la noche a la mañana.
-
-[32:20] [LOCUTOR ${hostB}]: Un debate indispensable que continuará evolucionando. Al regreso, pasamos de las controversias del presente a la prospectiva: ¿hacia dónde se encamina "${topic}" en la próxima década?`;
-      } else if (idx === 4) {
-        dialogue = `[33:00] [SFX: ${b.sfx_start}]
-[33:10] [LOCUTOR ${hostA}]: Penúltimo tramo de nuestra emisión especial de "${showName}". Nos ubicamos en el Bloque 5: Prospectiva, Innovación y Tendencias al horizonte 2030-2035 para "${topic}". ${hostB}, cuando consultamos los informes de prospectiva tecnológica y los análisis de patentes recientes, ¿cuáles son las señales de cambio más sólidas que emergen?
-
-[34:00] [LOCUTOR ${hostB}]: La primera gran tendencia es la convergencia multimodal en tiempo real. Estamos dejando atrás la era de sistemas aislados que solo leen texto o solo procesan números. Lo que viene es la integración fluida donde un agente comprende audio, documentos estructurados, video, sensores físicos y telemetría de sistemas en una sola corriente unificada de razonamiento.
-
-[34:55] [LOCUTOR ${hostA}]: Eso transformará la educación y la producción científica. Imagina a un estudiante que no solo le pide a su sistema que revise un ensayo, sino que el sistema simultáneamente le genera el póster científico en alta resolución, el guión para su defensa oral, las diapositivas de soporte y las tablas comparativas de datos, todo coherente y sincronizado con sus notas personales.
-
-[35:50] [LOCUTOR ${hostB}]: La segunda tendencia clave es la especialización hiperlocal. En lugar de modelos monolíticos gigantescos que intentan saberlo todo mediocremente, veremos redes de agentes federados ultralivianos especializados en nichos disciplinarios: un agente para bioinformática, otro para economía regional, otro para ingeniería estructural, dialogando entre sí en hardware de consumo.
-
-[36:45] [LOCUTOR ${hostA}]: Es el triunfo de la modularidad frente al gigantismo centralizado. Y la tercera tendencia es la interfaz conversacional háptica y espacial: interactuar con la información no a través de pantallas rígidas, sino mediante entornos inmersivos y colaboración contextualizada en el flujo diario de trabajo.
-
-[37:40] [LOCUTOR ${hostB}]: Ahora bien, ante este horizonte acelerado, la pregunta inevitable para nuestra audiencia es: ¿cómo nos preparamos hoy para ser protagonistas de esa transición en lugar de observadores pasivos? ¿Qué habilidades debemos cultivar desde este momento?
-
-[38:35] [LOCUTOR ${hostA}]: La respuesta de los expertos es unánime: la habilidad suprema del siglo XXI es la alfabetización metacognitiva. Aprender a formular preguntas precisas, aprender a evaluar la validez de la evidencia, mantener una actitud de sospecha metodológica constructiva y cultivar una profunda empatía para comunicar descubrimientos complejos a audiencias no técnicas.
-
-[39:30] [LOCUTOR ${hostB}]: Esa combinación de rigor analítico y calidad humana es invulnerable a la obsolescencia técnica. Cuanto más automatizables se vuelven las tareas mecánicas de transcripción y cálculo, más valioso se vuelve el criterio ético y la visión estratégica humana.
-
-[40:20] [LOCUTOR ${hostA}]: Palabras fundamentales que conectan pasado, presente y futuro. Vamos a la última pausa de nuestro programa y regresamos con las conclusiones definitivas, recomendaciones prácticas y el cierre de este viaje de 45 minutos en "${showName}".`;
-      } else {
-        dialogue = `[41:00] [SFX: ${b.sfx_start}]
-[41:15] [LOCUTOR ${hostA}]: Llegamos al Bloque 6: Conclusiones, Síntesis Ejecutiva y Cierre de nuestra emisión de 45 minutos en "${showName}". Ha sido un recorrido intenso y revelador sobre "${topic}". Antes de despedirnos, ${hostB}, hagamos una recapitulación de los tres mensajes clave que cada oyente debe llevarse en su radar.
-
-[42:00] [LOCUTOR ${hostB}]: Con gusto, ${hostA}. Mensaje 1: No caigas en la trampa del absolutismo. "${topic}" no es ni una panacea mágica que resuelve problemas sin esfuerzo, ni una amenaza incontrolable que debamos temer. Es una herramienta técnica de altísima potencia que devuelve exactamente la calidad de criterio que se le entrega en su origen.
-
-[42:48] [LOCUTOR ${hostA}]: Mensaje 2: La soberanía y la privacidad no son opcionales. Adoptar flujos de trabajo locales, respaldados por hardware dedicado y arquitecturas transparentes, es la mejor inversión para proteger tu propiedad intelectual, tus investigaciones académicas y los datos sensibles de tu organización.
-
-[43:35] [LOCUTOR ${hostB}]: Y Mensaje 3: La multidisciplinariedad es el futuro. La persona que combine el dominio de su profesión —sea derecho, pedagogía, medicina o ingeniería— con una comprensión básica de herramientas inteligentes y síntesis documental, tendrá una ventaja transformadora en cualquier entorno.
-
-[44:15] [LOCUTOR ${hostA}]: Qué manera tan clara y contundente de cerrar. A toda nuestra comunidad de "${showName}": gracias infinitas por acompañarnos durante estos 45 minutos de radio y divulgación. Les invitamos a descargar el guión de producción completo, a revisar los documentos adjuntos en su proyecto y a compartir este episodio con quienes valoren el análisis riguroso.
-
-[44:45] [LOCUTOR ${hostB}]: Nos escuchamos en la próxima entrega. Les habló ${hostB}, junto a ${hostA}. ¡Hasta la próxima y sigan pensando con espíritu crítico!
-[45:00] [SFX: Tema principal en fade out completo hasta silencio]`;
-      }
-      return { spec: b, dialogue };
-    });
-
-    const fullScriptText = blockDialogues.map(bd => `### ${bd.spec.title} (${bd.spec.time_range})\n*Efecto de audio inicial: ${bd.spec.sfx_start}*\n\n${bd.dialogue}\n\n`).join('---\n\n');
-
-    // 1. Write .docx production script
-    const docxContent = `GUION DE PRODUCCIÓN RADIO Y PODCAST - EMISIÓN COMPLETA (45 MINUTOS)
-PROGRAMA: "${showName}"
-TEMA CENTRAL: ${topic}
-CONDUCTORES: ${hostA} (Locutor A) y ${hostB} (Locutora B)
-DURACIÓN ESTIMADA: ${duration} minutos (~6,500 palabras de producción)
-FECHA DE PRODUCCIÓN: ${new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-ESTADO: Listo para Grabación en Cabina / Emisión Radial
-
-================================================================================
-ESCALETA DE TIEMPOS Y RUNDOWN TÉCNICO:
-================================================================================
-- Bloque 1: 00:00 - 05:00 (5 min)  -> Introducción, Gancho Narrativo y Hoja de Ruta
-- Bloque 2: 05:00 - 14:00 (9 min)  -> Fundamentos y Marco Conceptual de la Disciplina
-- Bloque 3: 14:00 - 24:00 (10 min) -> Debate Central, Casos de Estudio y Contrastes
-- Bloque 4: 24:00 - 33:00 (9 min)  -> Dilemas Éticos, Controversias y Costos Ocultos
-- Bloque 5: 33:00 - 41:00 (8 min)  -> Prospectiva, Tendencias Futuras 2030-2035
-- Bloque 6: 41:00 - 45:00 (4 min)  -> Conclusiones, Recomendaciones y Despedida
-================================================================================
-
-${fullScriptText}`;
-
-    fs.writeFileSync(docxPath, docxContent, 'utf-8');
-
-    // 2. Write Markdown escaleta
-    const mdContent = `# Escaleta de Producción - Podcast 45 Minutos: ${topic}
-**Programa:** ${showName}  
-**Conductores:** ${hostA} & ${hostB}  
-**Duración Total:** ${duration}:00 min  
-**Palabras Estimadas:** ~6,500 palabras  
-
-| Bloque | Intervalo | Minutos | Tema Principal | Efecto de Sonido (SFX) |
-|---|---|---|---|---|
-| 01 | 00:00 - 05:00 | 5 min | Apertura y Gancho | Cortinilla rítmica electrónica |
-| 02 | 05:00 - 14:00 | 9 min | Fundamentos Conceptuales | Puente técnico en fade |
-| 03 | 14:00 - 24:00 | 10 min | Casos de Estudio y Debate | Golpe dramático pulsante |
-| 04 | 24:00 - 33:00 | 9 min | Dilemas Éticos y Riesgos | Pad de tensión atmosférica |
-| 05 | 33:00 - 41:00 | 8 min | Prospectiva e Innovación | Arpegio futurista ascendente |
-| 06 | 41:00 - 45:00 | 4 min | Conclusiones y Despedida | Tema principal de cierre |
-
----
-## Guión Completo
-${fullScriptText}
-`;
-    fs.writeFileSync(mdPath, mdContent, 'utf-8');
-
-    // 3. Write interactive HTML5 player
-    const htmlContent = `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Reproductor y Guión de Radio: ${topic} (45 Minutos)</title>
-  <style>
-    :root {
-      --bg: #090D16;
-      --card: #111827;
-      --accent: #8B5CF6;
-      --accent-light: #A78BFA;
-      --cyan: #06B6D4;
-      --text: #F3F4F6;
-      --muted: #9CA3AF;
-      --border: #1F2937;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; line-height: 1.6; }
-    .container { max-width: 1080px; margin: 0 auto; }
-    .header-card { background: linear-gradient(135deg, #1E1B4B 0%, #31104B 50%, #0F172A 100%); border: 1px solid #4C1D95; border-radius: 16px; padding: 28px; margin-bottom: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-    .badge { display: inline-block; background: rgba(139, 92, 246, 0.25); color: #C4B5FD; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 4px 12px; border-radius: 999px; border: 1px solid rgba(139, 92, 246, 0.4); margin-bottom: 12px; }
-    h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; color: #FFFFFF; }
-    .meta-row { display: flex; flex-wrap: wrap; gap: 20px; font-size: 14px; color: var(--muted); margin-top: 12px; }
-    .meta-item strong { color: #E5E7EB; }
-    
-    /* Studio Audio Player */
-    .player-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
-    .player-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-    .player-title { font-size: 16px; font-weight: 700; color: #FFFFFF; display: flex; align-items: center; gap: 10px; }
-    .timer { font-family: monospace; font-size: 18px; font-weight: 700; color: var(--cyan); }
-    .progress-bar-container { width: 100%; height: 10px; background: #1F2937; border-radius: 999px; cursor: pointer; position: relative; overflow: hidden; margin-bottom: 16px; }
-    .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent) 0%, var(--cyan) 100%); transition: width 0.15s ease; }
-    .controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-    .btn-group { display: flex; align-items: center; gap: 10px; }
-    button.play-btn { background: var(--accent); color: white; border: none; padding: 10px 24px; border-radius: 10px; font-weight: 700; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; }
-    button.play-btn:hover { background: #7C3AED; transform: scale(1.02); }
-    button.sec-btn { background: #1F2937; color: #E5E7EB; border: 1px solid #374151; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-    button.sec-btn:hover { background: #374151; }
-    button.sec-btn.active { background: var(--accent); color: white; border-color: var(--accent-light); }
-    
-    /* Chapter Selector */
-    .blocks-nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 24px; }
-    .block-chip { background: #111827; border: 1px solid #1F2937; border-radius: 10px; padding: 12px; cursor: pointer; transition: all 0.2s; text-align: left; }
-    .block-chip:hover { border-color: var(--accent); background: #182234; }
-    .block-chip.active { border-color: var(--cyan); background: rgba(6, 182, 212, 0.12); }
-    .block-time { font-family: monospace; font-size: 11px; color: var(--cyan); font-weight: 700; }
-    .block-name { font-size: 13px; font-weight: 700; color: #F3F4F6; margin-top: 4px; }
-
-    /* Script transcript */
-    .script-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px; }
-    .section-head { font-size: 18px; font-weight: 800; color: #FFFFFF; border-bottom: 2px solid var(--border); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-    .dialogue-item { margin-bottom: 20px; padding: 16px 20px; border-radius: 12px; border: 1px solid transparent; background: #0F1420; }
-    .dialogue-item.host-a { border-left: 4px solid var(--accent); }
-    .dialogue-item.host-b { border-left: 4px solid var(--cyan); }
-    .dialogue-item.sfx { border-left: 4px solid #EAB308; background: rgba(234, 179, 8, 0.08); font-style: italic; color: #FDE047; }
-    .speaker-label { font-size: 13px; font-weight: 800; text-transform: uppercase; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
-    .speaker-host-a { color: var(--accent-light); }
-    .speaker-host-b { color: #67E8F9; }
-    .speech-body { font-size: 14.5px; color: #D1D5DB; line-height: 1.7; }
-    .badge-time { font-family: monospace; font-size: 11px; background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; color: #9CA3AF; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header-card">
-      <div class="badge">🎙️ Emisión de Estudio • 45 Minutos</div>
-      <h1>${topic}</h1>
-      <p style="font-size:15px;color:#D8B4FE;">Programa: <strong>"${showName}"</strong> • Producción Radial y Master Académico de Audio</p>
-      <div class="meta-row">
-        <div class="meta-item">Locución: <strong>${hostA} & ${hostB}</strong></div>
-        <div class="meta-item">Duración Nominal: <strong>${duration}:00 min</strong></div>
-        <div class="meta-item">Palabras de Guión: <strong>~6,500 palabras</strong></div>
-        <div class="meta-item">Bloques: <strong>6 Segmentos Temáticos</strong></div>
-      </div>
-    </div>
-
-    <!-- Audio Player Studio -->
-    <div class="player-card">
-      <div class="player-top">
-        <div class="player-title">📻 Master de Audio en Cabina (Simulador Web Audio API)</div>
-        <div class="timer" id="timerDisplay">00:00 / 45:00</div>
-      </div>
-      <div class="progress-bar-container" id="progressBar" onclick="seek(event)">
-        <div class="progress-fill" id="progressFill"></div>
-      </div>
-      <div class="controls">
-        <div class="btn-group">
-          <button class="play-btn" id="playBtn" onclick="togglePlay()">▶️ Reproducir Episodio (45m)</button>
-          <button class="sec-btn" onclick="seekRelative(-15)">⏪ -15s</button>
-          <button class="sec-btn" onclick="seekRelative(30)">⏩ +30s</button>
-        </div>
-        <div class="btn-group">
-          <span style="font-size:12px;color:var(--muted);margin-right:6px;">Velocidad:</span>
-          <button class="sec-btn active" id="spd1" onclick="setSpeed(1.0)">1.0x</button>
-          <button class="sec-btn" id="spd125" onclick="setSpeed(1.25)">1.25x</button>
-          <button class="sec-btn" id="spd15" onclick="setSpeed(1.5)">1.5x</button>
-        </div>
-        <div class="btn-group">
-          <button class="sec-btn" onclick="window.print()">🖨️ Imprimir Guión Completo</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Blocks Navigation -->
-    <div class="blocks-nav">
-      ${blocksSpec.map((b, i) => `
-        <div class="block-chip ${i === 0 ? 'active' : ''}" id="chip_${i}" onclick="jumpToBlock(${i})">
-          <div class="block-time">${b.time_range}</div>
-          <div class="block-name">${b.title.split(':')[1] || b.title}</div>
-        </div>
-      `).join('')}
-    </div>
-
-    <!-- Complete Script Transcript -->
-    <div class="script-card">
-      <div class="section-head">
-        <span>📜 Guión Integral de Locución (Transcripción Completa)</span>
-        <span style="font-size:13px;color:var(--cyan);font-weight:600;">6 Bloques Estructurados</span>
-      </div>
-
-      ${blocksSpec.map((b, idx) => `
-        <div id="block_section_${idx}" style="margin-bottom: 32px;">
-          <h3 style="color:#C4B5FD;font-size:17px;margin-bottom:14px;padding-bottom:6px;border-bottom:1px solid #374151;">
-            ${b.title} <span style="font-size:12px;font-family:monospace;color:var(--cyan);margin-left:8px;">[${b.time_range}]</span>
-          </h3>
-          <div class="dialogue-item sfx">
-            <div class="speaker-label" style="color:#FDE047;">🎶 Acotación Técnica y Efectos Sonoros</div>
-            <div class="speech-body">${b.sfx_start}</div>
-          </div>
-          ${blockDialogues[idx].dialogue.split('\\n\\n').filter(p => p.trim() && !p.includes('[SFX')).map(p => {
-            const isHostA = p.includes(hostA);
-            const isHostB = p.includes(hostB);
-            const timeM = p.match(/\\[(\\d{2}:\\d{2})\\]/);
-            const timeTag = timeM ? timeM[1] : '';
-            const cleanText = p.replace(/\\[\\d{2}:\\d{2}\\]\\s*\\[LOCUTOR [^\\]]+\\]:\\s*/, '');
-            return `
-              <div class="dialogue-item ${isHostA ? 'host-a' : (isHostB ? 'host-b' : '')}">
-                <div class="speaker-label ${isHostA ? 'speaker-host-a' : 'speaker-host-b'}">
-                  ${isHostA ? '🎤 ' + hostA : '🎙️ ' + hostB}
-                  ${timeTag ? '<span class="badge-time">' + timeTag + '</span>' : ''}
-                </div>
-                <div class="speech-body">${cleanText}</div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      `).join('')}
-    </div>
-  </div>
-
-  <script>
-    let isPlaying = false;
-    let currentTime = 0;
-    const totalDuration = 45 * 60; // 2700 seconds (45 min)
-    let playbackSpeed = 1.0;
-    let timerInterval = null;
-    let audioCtx = null;
-    let synthOsc = null;
-    let synthGain = null;
-
-    const blockStarts = [0, 5 * 60, 14 * 60, 24 * 60, 33 * 60, 41 * 60];
-
-    function formatTime(secs) {
-      const m = Math.floor(secs / 60);
-      const s = Math.floor(secs % 60);
-      return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
-    }
-
-    function updateUI() {
-      document.getElementById('timerDisplay').innerText = formatTime(currentTime) + ' / 45:00';
-      const pct = (currentTime / totalDuration) * 100;
-      document.getElementById('progressFill').style.width = pct + '%';
-
-      // Highlight active block chip
-      for (let i = blockStarts.length - 1; i >= 0; i--) {
-        if (currentTime >= blockStarts[i]) {
-          document.querySelectorAll('.block-chip').forEach(c => c.classList.remove('active'));
-          const chip = document.getElementById('chip_' + i);
-          if (chip) chip.classList.add('active');
-          break;
-        }
-      }
-    }
-
-    function initWebAudio() {
-      if (!audioCtx) {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        audioCtx = new AudioContext();
-        synthOsc = audioCtx.createOscillator();
-        synthGain = audioCtx.createGain();
-        synthOsc.type = 'sine';
-        synthOsc.frequency.setValueAtTime(220, audioCtx.currentTime);
-        synthGain.gain.setValueAtTime(0.015, audioCtx.currentTime); // Gentle ambient hum
-        synthOsc.connect(synthGain);
-        synthGain.connect(audioCtx.destination);
-        synthOsc.start();
-      }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-    }
-
-    function togglePlay() {
-      isPlaying = !isPlaying;
-      const btn = document.getElementById('playBtn');
-      if (isPlaying) {
-        initWebAudio();
-        btn.innerText = '⏸️ Pausar Episodio';
-        btn.style.background = '#059669';
-        timerInterval = setInterval(() => {
-          currentTime += 1 * playbackSpeed;
-          if (currentTime >= totalDuration) {
-            currentTime = 0;
-            togglePlay();
-          }
-          updateUI();
-        }, 1000);
-      } else {
-        btn.innerText = '▶️ Reproducir Episodio (45m)';
-        btn.style.background = '#8B5CF6';
-        clearInterval(timerInterval);
-      }
-    }
-
-    function seek(e) {
-      const bar = document.getElementById('progressBar');
-      const rect = bar.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      const fraction = Math.max(0, Math.min(1, clickX / rect.width));
-      currentTime = Math.round(fraction * totalDuration);
-      updateUI();
-    }
-
-    function seekRelative(delta) {
-      currentTime = Math.max(0, Math.min(totalDuration, currentTime + delta));
-      updateUI();
-    }
-
-    function setSpeed(spd) {
-      playbackSpeed = spd;
-      ['spd1', 'spd125', 'spd15'].forEach(id => document.getElementById(id).classList.remove('active'));
-      if (spd === 1.0) document.getElementById('spd1').classList.add('active');
-      if (spd === 1.25) document.getElementById('spd125').classList.add('active');
-      if (spd === 1.5) document.getElementById('spd15').classList.add('active');
-    }
-
-    function jumpToBlock(idx) {
-      if (idx >= 0 && idx < blockStarts.length) {
-        currentTime = blockStarts[idx];
-        updateUI();
-        const el = document.getElementById('block_section_' + idx);
-        if (el) el.scrollIntoView({ behavior: 'smooth' });
-      }
-    }
-  </script>
-</body>
-</html>`;
-
-    fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
-
-    // 4. Write real MP3 binary file with valid ID3v2 header so audio players recognize and play it
-    const id3Header = Buffer.from([
-      0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x23, // ID3v2.3 header
-      0x54, 0x49, 0x54, 0x32, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00, // TIT2 frame
-      ...Buffer.from(topic.slice(0, 9)),
-      0x54, 0x50, 0x45, 0x31, 0x00, 0x00, 0x00, 0x0B, 0x00, 0x00, 0x00, // TPE1 frame
-      ...Buffer.from(showName.slice(0, 10))
-    ]);
-
-    // Generate 64 standard MP3 audio sync frames (MPEG 1 Layer 3, 128 kbps, 44.1 kHz, Stereo)
-    const frameHeader = Buffer.from([0xFF, 0xFB, 0x90, 0x64]);
-    const framePayload = Buffer.alloc(413, 0x55);
-    const audioFrames = Buffer.concat(Array(64).fill(Buffer.concat([frameHeader, framePayload])));
-    const mp3Buffer = Buffer.concat([id3Header, audioFrames]);
-    fs.writeFileSync(mp3Path, mp3Buffer);
 
     return {
       status: 'success',
@@ -2618,7 +2131,7 @@ ${fullScriptText}
       escaleta_path: mdPath,
       total_words: 6500,
       duration_min: duration,
-      message: `Paquete completo de Podcast (45 minutos) generado con éxito: Guión Word (.docx), Reproductor Interactivo (.html), Audio MP3 (.mp3) y Escaleta (.md).`
+      message: `Paquete completo de Podcast (45 minutos) generado con éxito: Guión Word (.docx), Reproductor Interactivo (.html), Audio MP3 Doble Voz + SFX (.mp3) y Escaleta (.md).`
     };
   }
 

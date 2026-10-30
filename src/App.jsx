@@ -335,7 +335,9 @@ export default function App() {
 
   const handleOpenFile = async (filePath) => {
     try {
-      if (window.electronAPI && window.electronAPI.openPath) {
+      const low = (filePath || '').toLowerCase();
+      const isPodcastHtml = low.endsWith('.html') && low.includes('podcast');
+      if (window.electronAPI && window.electronAPI.openPath && !isPodcastHtml) {
         await window.electronAPI.openPath(filePath);
       } else {
         const res = await fetch(`${API_BASE}/api/system/open-file`, {
@@ -345,7 +347,9 @@ export default function App() {
         });
         if (res.ok) {
           const data = await res.json();
-          setPreviewFile(data);
+          if (data.content || data.rawUrl) {
+            setPreviewFile(data);
+          }
         }
       }
     } catch (e) {
@@ -559,6 +563,7 @@ export default function App() {
           onOpenFile={handleOpenFile}
           onOpenProjectFolder={handleOpenProjectFolder}
           activeProject={activeProject}
+          onRefreshFiles={() => fetchProjectFiles(activeProject)}
         />
       </div>
 
@@ -601,6 +606,24 @@ export default function App() {
                   srcDoc={previewFile.content}
                   className="w-full h-full border-0 bg-white"
                 />
+              ) : previewFile.ext === '.mp3' || previewFile.ext === '.wav' ? (
+                <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-6">
+                  <div className="w-24 h-24 rounded-3xl bg-violet-600/20 border border-violet-500/40 flex items-center justify-center text-5xl shadow-lg shadow-violet-900/30">
+                    🎙️
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white mb-1">{previewFile.name}</h3>
+                    <p className="text-xs text-slate-400">
+                      Master de Podcast • Doble Voz (Hombre + Mujer) + Efectos Sonoros (SFX)
+                    </p>
+                  </div>
+                  <audio
+                    controls
+                    autoPlay
+                    src={`${API_BASE}${previewFile.rawUrl || previewFile.downloadUrl}`}
+                    className="w-full max-w-xl"
+                  />
+                </div>
               ) : (
                 <pre className="p-6 text-xs text-slate-200 font-mono whitespace-pre-wrap leading-relaxed">
                   {previewFile.content || 'Archivo listo para descargar.'}

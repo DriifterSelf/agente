@@ -590,6 +590,8 @@ class PodcastTools:
         if not filename.lower().endswith('.html'):
             filename += '.html'
         target_html = os.path.join(project_path, filename)
+        proj_name = os.path.basename(os.path.normpath(project_path))
+        mp3_fn = filename[:-5] + ".mp3"
 
         html_content = build_podcast_html(
             title=title,
@@ -597,7 +599,9 @@ class PodcastTools:
             host_a_name=config.get('host_a', 'Alex').split('(')[0].strip(),
             host_b_name=config.get('host_b', 'Elena').split('(')[0].strip(),
             duration=config.get('duration_minutes', 45),
-            segments=segments
+            segments=segments,
+            project_name=proj_name,
+            mp3_filename=mp3_fn
         )
 
         with open(target_html, 'w', encoding='utf-8') as fh:
@@ -610,15 +614,144 @@ class PodcastTools:
         project_path: str,
         filename: str,
         text_content: str,
-        lang: str = 'es'
+        lang: str = 'es',
+        segments: Optional[List[Dict[str, Any]]] = None,
+        host_a: str = 'Alex',
+        host_b: str = 'Elena'
     ) -> Optional[str]:
         """
-        Genera archivo de audio real (.wav y .mp3) del master del podcast:
+        Genera archivo de audio real (.mp3) del master completo del podcast:
         1. Limpia todo el texto con clean_speech_text (sin corchetes, sin SFX leídos).
-        2. Intenta gTTS o síntesis nativa de PowerShell (SAPI5) en Windows.
-        3. Genera un archivo WAV broadcast real con melodía de apertura, chimes y tonos de emisión.
+        2. Sintetiza Voz de Hombre (Alex) y Voz de Mujer (Elena) en los 6 bloques.
+        3. Inserta Cortinilla de Entrada, Sweeps de Transición, Efectos Sonoros y Cierre Musical.
         """
-        return synthesize_podcast_audio(project_path, filename, text_content, lang)
+        return synthesize_podcast_audio(
+            project_path=project_path,
+            filename=filename,
+            text_content=text_content,
+            lang=lang,
+            segments=segments,
+            host_a=host_a,
+            host_b=host_b
+        )
+
+    @classmethod
+    def reexport_project_podcast(
+        cls,
+        project_path: str,
+        target_filename: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Re-exporta en MP3 (Doble Voz Hombre + Mujer + Efectos Sonoros en los 6 bloques)
+        y actualiza el Reproductor Interactivo (.html) a partir del guión existente en el proyecto,
+        sin necesidad de esperar a que el LLM vuelva a redactar el texto desde cero.
+        """
+        os.makedirs(project_path, exist_ok=True)
+        files = [f for f in os.listdir(project_path) if os.path.isfile(os.path.join(project_path, f))]
+
+        # Buscar archivo de guión existente (.md o .docx de Podcast)
+        md_candidates = [f for f in files if f.lower().endswith(".md") and "podcast" in f.lower()]
+        docx_candidates = [f for f in files if f.lower().endswith(".docx") and "podcast" in f.lower()]
+        html_candidates = [f for f in files if f.lower().endswith(".html") and "podcast" in f.lower()]
+
+        raw_script = ""
+        base_slug = "Podcast_Episodio_45min"
+        title = "Episodio Especial de Podcast (45 Minutos)"
+        show_name = "Voces del Conocimiento"
+        host_a = "Alex"
+        host_b = "Elena"
+        duration = 45
+
+        if md_candidates:
+            md_candidates.sort(key=lambda x: os.path.getmtime(os.path.join(project_path, x)), reverse=True)
+            chosen_md = md_candidates[0]
+            base_slug = re.sub(r"(_escaleta)?\.md$", "", chosen_md, flags=re.IGNORECASE)
+            with open(os.path.join(project_path, chosen_md), "r", encoding="utf-8", errors="ignore") as f:
+                raw_script = f.read()
+        elif docx_candidates:
+            docx_candidates.sort(key=lambda x: os.path.getmtime(os.path.join(project_path, x)), reverse=True)
+            chosen_docx = docx_candidates[0]
+            base_slug = chosen_docx[:-5]
+            docx_full = os.path.join(project_path, chosen_docx)
+            try:
+                import docx
+                d = docx.Document(docx_full)
+                raw_script = "\n\n".join(p.text.strip() for p in d.paragraphs if p.text.strip())
+            except Exception:
+                with open(docx_full, "r", encoding="utf-8", errors="ignore") as f:
+                    raw_script = f.read()
+
+        if raw_script:
+            m_title = re.search(r"#\s*(?:Guión de Podcast|Escaleta de Producción[^\n]*):\s*([^\n]+)", raw_script)
+            if m_title:
+                title = m_title.group(1).strip()
+            segments = parse_script_into_segments(raw_script, host_a, host_b)
+        else:
+            # Si no había guión aún en este proyecto, construir los 6 bloques base con el contexto del proyecto
+            doc_ctx = cls.gather_project_context(project_path)
+            config_fb = cls.parse_podcast_config(doc_ctx.get("filename") or "Innovación y Conocimiento")
+            title = config_fb["topic"]
+            base_slug = config_fb["filename_base"]
+            segments = [
+                {
+                    "title": spec["title"],
+                    "time_range": spec["time_range"],
+                    "body": cls._build_fallback_podcast_segment(spec, config_fb, doc_ctx.get("content", ""))
+                }
+                for spec in cls.PODCAST_BLOCKS_SPEC
+            ]
+
+        config = {
+            "topic": title,
+            "duration_minutes": duration,
+            "show_name": show_name,
+            "host_a": host_a,
+            "host_b": host_b,
+            "filename_base": base_slug
+        }
+
+        # Actualizar todos los archivos HTML de reproductor existentes en el proyecto para que tengan audio funcional
+        html_filename = f"{base_slug}.html"
+        if html_candidates:
+            for hc in html_candidates:
+                cls.export_podcast_html_player(
+                    project_path=project_path,
+                    filename=hc,
+                    title=title,
+                    config=config,
+                    segments=segments
+                )
+            html_filename = html_candidates[0]
+        else:
+            cls.export_podcast_html_player(
+                project_path=project_path,
+                filename=html_filename,
+                title=title,
+                config=config,
+                segments=segments
+            )
+
+        mp3_filename = f"{base_slug}.mp3"
+        full_text = "\n\n".join(s.get("body", "") for s in segments)
+        mp3_path = cls.export_podcast_audio(
+            project_path=project_path,
+            filename=mp3_filename,
+            text_content=full_text,
+            segments=segments,
+            host_a=host_a,
+            host_b=host_b
+        )
+
+        proj_name = os.path.basename(os.path.normpath(project_path))
+        final_mp3_name = os.path.basename(mp3_path) if mp3_path else mp3_filename
+        return {
+            "status": "success",
+            "file_name": final_mp3_name,
+            "audio_file": mp3_path,
+            "html_player": os.path.join(project_path, html_filename),
+            "download_url": f"/api/projects/{urllib.parse.quote(proj_name)}/download/{urllib.parse.quote(final_mp3_name)}" if "urllib" in globals() else f"/api/projects/{proj_name}/download/{final_mp3_name}",
+            "message": f"Podcast re-exportado en MP3 con Doble Voz (Hombre + Mujer) y Efectos Sonoros ({final_mp3_name})."
+        }
 
     @classmethod
     def generate_podcast_stream(
@@ -657,9 +790,9 @@ class PodcastTools:
                 f"🎙️ **Iniciando Producción Integral de Podcast ({duration} Minutos)**\n\n"
                 f"- **Programa:** *{show_name}*\n"
                 f"- **Episodio Central:** «{topic}»\n"
-                f"- **Voces en Cabina:** {host_a} y {host_b}\n"
+                f"- **Voces en Cabina:** {host_a} (Voz Masculina) y {host_b} (Voz Femenina)\n"
                 + (f"- **Documento Base del Proyecto:** `{doc_filename}` ({len(doc_content.split()):,} palabras de referencia)\n" if doc_filename else "")
-                + f"- **Estructura:** Escaleta cronometrada en 6 segmentos de 00:00 a 45:00 (~6,500 palabras de diálogo orgánico, marcas de tiempo y acotaciones sonoras).\n\n"
+                + f"- **Estructura:** Escaleta cronometrada en 6 segmentos de 00:00 a 45:00 (~6,500 palabras de diálogo orgánico, marcas de tiempo y efectos sonoros SFX).\n\n"
                 f"---\n\n"
             )
         }
@@ -754,7 +887,7 @@ class PodcastTools:
             first_snippet = segment_body.split("\n\n")[0][:280] if segment_body else ""
             accumulated_dialogue_summary.append(f"- {seg_title}: {first_snippet}")
 
-        # Generar los 4 artefactos de entrega
+        # Generar los 4 artefactos de entrega con TODOS los 6 bloques
         docx_res = cls.export_podcast_docx(
             project_path=project_path,
             filename=f"{fn_base}.docx",
@@ -771,11 +904,14 @@ class PodcastTools:
             segments=compiled_segments
         )
 
-        audio_sample_text = "\n\n".join(s["body"] for s in compiled_segments[:2])
+        full_audio_script = "\n\n".join(s["body"] for s in compiled_segments)
         mp3_path = cls.export_podcast_audio(
             project_path=project_path,
             filename=f"{fn_base}.mp3",
-            text_content=audio_sample_text
+            text_content=full_audio_script,
+            segments=compiled_segments,
+            host_a=host_a.split("(")[0].strip(),
+            host_b=host_b.split("(")[0].strip()
         )
 
         md_path = docx_res.get("markdown_file") or os.path.join(project_path, f"{fn_base}.md")
@@ -813,8 +949,8 @@ class PodcastTools:
             f"- **Estructura:** 6 bloques temáticos cronometrados con marcas de tiempo `[00:00]` a `[45:00]` y efectos `[SFX]`.\n\n"
             f"📦 **Entregables creados en tu proyecto (listos en el panel de la derecha):**\n"
             f"1. **`{os.path.basename(docx_res.get('file', ''))}`** — Guión de Producción en Word (.docx) con códigos de color para cabina de radio.\n"
-            f"2. **`{os.path.basename(html_path)}`** — Reproductor Web Interactivo (.html) con timeline de 45 minutos y transcripción completa.\n"
-            f"3. **`{os.path.basename(mp3_path) if mp3_path else 'Podcast.mp3'}`** — Archivo de Audio Narrado (.mp3) generado.\n"
+            f"2. **`{os.path.basename(html_path)}`** — Reproductor Web Interactivo (.html) con Doble Voz (Hombre + Mujer) y efectos sonoros en vivo.\n"
+            f"3. **`{os.path.basename(mp3_path) if mp3_path else 'Podcast.mp3'}`** — Archivo de Audio Master (.mp3) con Doble Voz y Efectos Sonoros.\n"
             f"4. **`{os.path.basename(md_path)}`** — Escaleta técnica en Markdown (.md).\n"
         )
         yield {"type": "token", "content": summary_msg}

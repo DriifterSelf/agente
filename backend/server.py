@@ -17,17 +17,21 @@ if ROOT_DIR not in sys.path:
 
 from fastapi import FastAPI, HTTPException, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response, FileResponse
 from pydantic import BaseModel
 
 try:
     from backend.engine import InferenceEngine
     from backend.agent import AutonomousAgent
     from backend.tools.system_tools import SystemTools
+    from backend.tools.podcast_tools import PodcastTools
+    from backend.tools.podcast_player_template import synthesize_single_line_audio
 except ImportError:
     InferenceEngine = None
     AutonomousAgent = None
     SystemTools = None
+    PodcastTools = None
+    synthesize_single_line_audio = None
 
 WINDOWS_RESERVED = {
     "CON", "PRN", "AUX", "NUL",
@@ -404,9 +408,62 @@ def open_project_folder(name: str):
     target = _safe_project_path(name)
     return SystemTools.open_in_windows(target) if SystemTools else {"status": "ok"}
 
+@app.get("/api/tts-line")
+def tts_line_endpoint(text: str = "", gender: str = "male", lang: str = "es"):
+    if not synthesize_single_line_audio:
+        raise HTTPException(status_code=500, detail="TTS no disponible")
+    audio_bytes, mime_type = synthesize_single_line_audio(text=text, gender=gender, lang=lang)
+    return Response(
+        content=audio_bytes,
+        media_type=mime_type,
+        headers={"Cache-Control": "public, max-age=3600"}
+    )
+
+@app.post("/api/projects/{name}/export-podcast-mp3")
+def export_podcast_mp3_endpoint(name: str):
+    target = _safe_project_path(name)
+    if not PodcastTools:
+        raise HTTPException(status_code=500, detail="Motor de podcast no disponible")
+    res = PodcastTools.reexport_project_podcast(target)
+    return res
+
+@app.get("/api/projects/{name}/download/{filename}")
+def download_project_file(name: str, filename: str):
+    target_dir = _safe_project_path(name)
+    safe_fn = os.path.basename(filename)
+    full_p = os.path.join(target_dir, safe_fn)
+    if not os.path.exists(full_p) or not os.path.isfile(full_p):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    ext = os.path.splitext(safe_fn)[1].lower()
+    mime_map = {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".html": "text/html",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".pdf": "application/pdf",
+        ".md": "text/markdown"
+    }
+    return FileResponse(full_p, media_type=mime_map.get(ext, "application/octet-stream"), filename=safe_fn)
+
 @app.post("/api/system/open-file")
 def open_file_in_windows(req: OpenFileRequest):
-    return SystemTools.open_in_windows(req.path) if SystemTools else {"status": "ok"}
+    file_path = req.path
+    # Si el usuario abre un reproductor Podcast_*.html antiguo que no tenía síntesis de voz o botón MP3,
+    # actualizarlo automáticamente en disco antes de abrirlo para que siempre tenga voz y efectos reales.
+    if file_path and os.path.exists(file_path):
+        fn_low = os.path.basename(file_path).lower()
+        if fn_low.endswith(".html") and "podcast" in fn_low and PodcastTools:
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    curr_html = f.read()
+                if "exportPodcastMp3Again" not in curr_html or "_playViaServerTts" not in curr_html:
+                    proj_dir = os.path.dirname(file_path)
+                    PodcastTools.reexport_project_podcast(proj_dir)
+            except Exception:
+                pass
+    return SystemTools.open_in_windows(file_path) if SystemTools else {"status": "ok"}
 
 @app.get("/api/models")
 def list_models():

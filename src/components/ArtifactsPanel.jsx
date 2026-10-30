@@ -12,13 +12,69 @@ import {
   Search,
   Video,
   Music,
-  Headphones
+  Headphones,
+  RefreshCw,
+  Download
 } from 'lucide-react';
+import { API_BASE } from '../config';
 
-export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFolder, activeProject }) {
+export default function ArtifactsPanel({
+  artifacts,
+  onOpenFile,
+  onOpenProjectFolder,
+  activeProject,
+  onRefreshFiles
+}) {
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedPath, setCopiedPath] = useState(null);
   const [openingFile, setOpeningFile] = useState(null);
+  const [isExportingMp3, setIsExportingMp3] = useState(false);
+  const [exportStatusMsg, setExportStatusMsg] = useState('');
+
+  const hasPodcastFiles = (artifacts || []).some((a) =>
+    a.name.toLowerCase().includes('podcast')
+  );
+
+  const handleReexportPodcastMp3 = async () => {
+    if (!activeProject || isExportingMp3) return;
+    setIsExportingMp3(true);
+    setExportStatusMsg('Generando MP3 (Voz Hombre + Mujer + SFX)...');
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/projects/${encodeURIComponent(activeProject)}/export-podcast-mp3`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setExportStatusMsg(`✅ Listo: ${data.file_name || 'Podcast.mp3'}`);
+        if (onRefreshFiles) {
+          await onRefreshFiles();
+        }
+        if (data.audio_file && window.electronAPI && window.electronAPI.openPath) {
+          await window.electronAPI.openPath(data.audio_file);
+        } else if (data.download_url) {
+          const link = document.createElement('a');
+          link.href = `${API_BASE}${data.download_url}`;
+          link.download = data.file_name || 'Podcast_45min.mp3';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+      } else {
+        setExportStatusMsg('⚠️ Error al exportar el MP3');
+      }
+    } catch (e) {
+      console.error('Error exporting podcast MP3:', e);
+      setExportStatusMsg('⚠️ Error de conexión al exportar MP3');
+    } finally {
+      setIsExportingMp3(false);
+      setTimeout(() => setExportStatusMsg(''), 5000);
+    }
+  };
 
   const getFileBadge = (filename) => {
     const ext = filename.split('.').pop().toLowerCase();
@@ -176,7 +232,7 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
     setTimeout(() => setOpeningFile(null), 1000);
   };
 
-  const filteredArtifacts = (artifacts || []).filter(art => 
+  const filteredArtifacts = (artifacts || []).filter((art) =>
     art.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -198,6 +254,30 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
           </button>
         )}
       </div>
+
+      {/* Quick Action Bar to Re-export Podcast in MP3 + Upgrade Player */}
+      {activeProject && (hasPodcastFiles || (artifacts && artifacts.length > 0)) && (
+        <div className="px-3 py-2.5 border-b border-border bg-violet-950/20">
+          <button
+            onClick={handleReexportPodcastMp3}
+            disabled={isExportingMp3}
+            className="w-full py-2 px-3 rounded-xl text-xs font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-60 text-white shadow-md shadow-violet-900/30 flex items-center justify-center space-x-2 transition"
+            title="Volver a exportar el Podcast en MP3 con Doble Voz (Hombre y Mujer) + Efectos Sonoros y actualizar el Player"
+          >
+            <RefreshCw size={13} className={isExportingMp3 ? 'animate-spin' : ''} />
+            <span>
+              {isExportingMp3
+                ? 'Exportando MP3 Doble Voz...'
+                : '🎙️ Exportar Podcast en MP3'}
+            </span>
+          </button>
+          {exportStatusMsg && (
+            <p className="text-[10.5px] text-violet-300 text-center mt-1.5 font-medium">
+              {exportStatusMsg}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Search Input if more than 3 artifacts */}
       {artifacts && artifacts.length > 3 && (
@@ -222,6 +302,7 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
             const badge = getFileBadge(art.name);
             const isCopied = copiedPath === art.name;
             const isOpening = openingFile === art.name;
+            const isPodcastItem = art.name.toLowerCase().includes('podcast');
             return (
               <div
                 key={idx}
@@ -268,6 +349,22 @@ export default function ArtifactsPanel({ artifacts, onOpenFile, onOpenProjectFol
                   <span>{isOpening ? 'Abriendo...' : `Abrir en ${badge.label}`}</span>
                   <ExternalLink size={12} />
                 </button>
+
+                {/* Re-export MP3 button on Podcast items */}
+                {isPodcastItem && (
+                  <button
+                    onClick={handleReexportPodcastMp3}
+                    disabled={isExportingMp3}
+                    className="w-full mt-1.5 py-1.5 px-3 rounded-lg text-[11px] font-semibold bg-violet-500/15 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30 flex items-center justify-center space-x-1.5 transition"
+                  >
+                    <Download size={11} />
+                    <span>
+                      {isExportingMp3
+                        ? 'Generando MP3...'
+                        : 'Exportar otra vez en MP3'}
+                    </span>
+                  </button>
+                )}
               </div>
             );
           })
